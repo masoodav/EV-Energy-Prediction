@@ -22,7 +22,12 @@ from feature_engineering.feature_creator import (
     encode_categorical_features
 )
 from cross_validation.train_test_split import prepare_tscv_splits
-from modeling.model import train_and_tune_model
+# The model module is imported twice in your original code,
+# so I've simplified it to a single import.
+from modeling.model import (
+    train_and_tune_model,
+    find_best_random_forest_model
+)
 
 # Import all data analysis and visualization functions
 from exploratory_data_analysis.data_analysis import (
@@ -45,9 +50,9 @@ if __name__ == "__main__":
         description='EV Data Analysis Pipeline',
         epilog=(
             "\nExample usage:\n"
-            "  python main.py                       # Run all steps except visualization\n"
-            "  python main.py --include-visualization  # Include data visualization step\n"
-            "  python main.py --help                # Show this help message\n"
+            "   python main.py                     # Run all steps except visualization\n"
+            "   python main.py --include-visualization   # Include data visualization step\n"
+            "   python main.py --help                # Show this help message\n"
         ),
         formatter_class=argparse.RawTextHelpFormatter
     )
@@ -111,22 +116,25 @@ if __name__ == "__main__":
         print("\n--- Time-Series Cross-Validation and Model Training ---")
         features = [col for col in df.columns if col != target_variable]
         n_splits = 5
-        fold_results = []
-        for X_train, X_test, y_train, y_test in prepare_tscv_splits(df, features, target_variable, n_splits=n_splits):
-            best_model, mse = train_and_tune_model(X_train, y_train, X_test, y_test)
-            fold_results.append(mse)
-            print(f"Fold Test MSE: {mse:.4f}")
+        # Use separate lists to store results for each model
+        random_search_results = []
+        grid_search_results = []
 
-        print("\n--- Cross-Validation Results ---")
-        print("Test MSEs for each fold:", fold_results)
-        print(f"Average Test MSE: {np.mean(fold_results):.4f}")
-        n_splits = 5
-        fold_results = []
         for X_train, X_test, y_train, y_test in prepare_tscv_splits(df, features, target_variable, n_splits=n_splits):
-            best_model, mse = train_and_tune_model(X_train, y_train, X_test, y_test)
-            fold_results.append(mse)
-            print(f"Fold Test MSE: {mse:.4f}")
+            # Run the original random search and store results
+            best_model_rand, mse_rand = train_and_tune_model(X_train, y_train, X_test, y_test)
+            random_search_results.append(mse_rand)
+            print(f"Random Search Fold Test MSE: {mse_rand:.4f}")
 
-        print("\n--- Cross-Validation Results ---")
-        print("Test MSEs for each fold:", fold_results)
-        print(f"Average Test MSE: {np.mean(fold_results):.4f}")
+            # Run the refined grid search and store results
+            best_model_grid, best_params_grid, best_mse_grid = find_best_random_forest_model(X_train, y_train, X_test, y_test)
+            grid_search_results.append(best_mse_grid)
+            print(f"Refined Grid Search Fold Test MSE: {best_mse_grid:.4f}")
+
+        # Step 7: Print combined results for comparison
+        print("\n--- Combined Cross-Validation Results ---")
+        print("Random Search Test MSEs for each fold:", random_search_results)
+        print(f"Random Search Average Test MSE: {np.mean(random_search_results):.4f}")
+        print("\nRefined Grid Search Test MSEs for each fold:", grid_search_results)
+        print(f"Refined Grid Search Average Test MSE: {np.mean(grid_search_results):.4f}")
+
