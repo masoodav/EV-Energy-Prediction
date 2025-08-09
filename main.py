@@ -16,7 +16,8 @@ from data_preprocessing.data_preprocessor import (
     impute_missing_data,
     suggest_imputation_strategy,
     auto_impute_missing_data,
-    handle_outliers_iqr_method
+    handle_outliers_iqr_method,
+    scale_features_and_transform_target
 )
 from feature_engineering.feature_creator import (
     create_combined_ev_features,
@@ -24,8 +25,16 @@ from feature_engineering.feature_creator import (
 )
 from cross_validation.train_test_split import prepare_tscv_splits
 
-# New: We now import the main modeling function from the model.py file
-from modeling.model import run_model_comparison_pipeline
+# Updated imports from the improved model.py file
+from modeling.model import (
+    run_model_comparison_pipeline, 
+    tune_lightgbm_model,
+    test_different_random_states,
+    tune_model_stack,
+    run_final_model_training,  # New comprehensive function
+    save_models_for_ab_testing,
+    load_model_for_prediction
+)
 
 # Import all data analysis and visualization functions
 from exploratory_data_analysis.data_analysis import (
@@ -108,8 +117,65 @@ if __name__ == "__main__":
             'total_braking_force',
             'traffic_density'
         ] + [col for col in df.columns if col.startswith('weather_condition_') or col.startswith('road_type_')]
-        df = df[selected_features + [target_variable]]
+        
+        # Scale features and transform target
+        df_processed, scaler = scale_features_and_transform_target(
+            df[selected_features + [target_variable]], 
+            selected_features, 
+            target_variable
+        )
+
+        # Update df for modeling
+        df = df_processed
 
         # Step 6: Time-Series Cross-Validation and Model Training
         # We now call the new function in model.py to handle all model training and evaluation
         run_model_comparison_pipeline(df, selected_features, target_variable)
+        
+        # Step 7: Enhanced Hyperparameter Tuning and Final Model Selection
+        print("\n" + "="*80)
+        print("🚀 STARTING ENHANCED MODEL TRAINING PIPELINE")
+        print("="*80)
+        
+        # Use the final train/test split from TSCV for tuning and final evaluation
+        tscv_splits = prepare_tscv_splits(df, selected_features, target_variable, n_splits=5)
+        
+        # Get the last fold, which is the most recent data
+        X_train, X_test, y_train, y_test = list(tscv_splits)[-1]
+        
+        print(f"📊 Training set shape: {X_train.shape}")
+        print(f"📊 Test set shape: {X_test.shape}")
+        print(f"🎯 Target variable: {target_variable}")
+        print(f"🔧 Features: {selected_features}")
+        
+        # Run the comprehensive final model training pipeline
+        final_model, final_rmse, model_results = run_final_model_training(
+            X_train, y_train, X_test, y_test, selected_features
+        )
+        
+        # Display final summary
+        print("\n" + "="*80)
+        print("🎉 PIPELINE COMPLETED SUCCESSFULLY!")
+        print("="*80)
+        print(f"✅ Final Production Model: Stacking Ensemble")
+        print(f"📈 Final RMSE: {final_rmse:.4f}")
+        print(f"💾 Models saved for A/B testing")
+        print(f"📁 Check 'saved_models' directory for model files")
+        
+        # Optional: Show how to load and use the models
+        print("\n📚 Model Usage Examples:")
+        print("="*40)
+        lgb_file = model_results['model_files']['lgb_file']
+        stack_file = model_results['model_files']['stack_file']
+        
+        print(f"# Load LightGBM model:")
+        print(f"# lgb_data = load_model_for_prediction('{lgb_file}')")
+        print(f"# lgb_model = lgb_data['model']")
+        print(f"")
+        print(f"# Load Stacking Ensemble model:")
+        print(f"# stack_data = load_model_for_prediction('{stack_file}')")
+        print(f"# stack_model = stack_data['model']")
+        print(f"")
+        print(f"# Make predictions:")
+        print(f"# predictions = stack_model.predict(new_data)")
+    

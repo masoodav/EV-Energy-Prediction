@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer, KNNImputer
+from sklearn.preprocessing import StandardScaler
 
 def find_missing_data(df: pd.DataFrame):
     """
@@ -236,3 +237,22 @@ def handle_outliers_iqr_method(df: pd.DataFrame, column: str, strategy: str = 'c
         print("  Invalid strategy. Choose 'cap' or 'remove'. No action taken.")
     
     return df_copy
+
+def scale_features_and_transform_target(df, features, target_variable):
+    """
+    Scales features using StandardScaler and applies log transform to target.
+    """
+    df_scaled = df.copy()
+    
+    # Scale features
+    scaler = StandardScaler()
+    df_scaled[features] = scaler.fit_transform(df[features])
+    
+    # Log transform the target (adding small constant to avoid log(0))
+    df_scaled[target_variable] = np.log1p(df_scaled[target_variable])
+    
+    print("\n--- Feature Scaling and Target Transformation ---")
+    print("Features standardized to zero mean and unit variance")
+    print(f"Target '{target_variable}' log-transformed")
+    
+    return df_scaled, scaler
