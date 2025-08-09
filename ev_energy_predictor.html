@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV Energy Prediction Demo</title>
+    <!-- Tailwind CSS CDN for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        .container {
+            max-width: 900px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen p-4">
+
+    <div class="container mx-auto p-8 bg-white rounded-2xl shadow-xl border border-gray-200">
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight mb-2">EV Energy & Range Predictor</h1>
+            <p class="text-lg text-gray-500">Adjust the variables and see the predicted outcomes.</p>
+        </div>
+
+        <!-- Input Control Panel -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <!-- Speed -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="speed-slider" class="block text-xl font-semibold text-gray-700 mb-2">Speed ($km/h$)</label>
+                <input type="range" id="speed-slider" min="0" max="150" value="60" class="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer">
+                <span id="speed-value" class="block text-right mt-2 text-gray-500">60 km/h</span>
+            </div>
+
+            <!-- Acceleration -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="accel-slider" class="block text-xl font-semibold text-gray-700 mb-2">Acceleration ($m/s^2$)</label>
+                <input type="range" id="accel-slider" min="-5" max="5" step="0.1" value="0.5" class="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer">
+                <span id="accel-value" class="block text-right mt-2 text-gray-500">0.5 $m/s^2$</span>
+            </div>
+
+            <!-- Braking Intensity -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="brake-slider" class="block text-xl font-semibold text-gray-700 mb-2">Brake Intensity</label>
+                <input type="range" id="brake-slider" min="0" max="10" value="0" class="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer">
+                <span id="brake-value" class="block text-right mt-2 text-gray-500">0</span>
+            </div>
+
+            <!-- Regen Braking Usage -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="regen-slider" class="block text-xl font-semibold text-gray-700 mb-2">Regen Braking Usage (%)</label>
+                <input type="range" id="regen-slider" min="0" max="100" value="50" class="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer">
+                <span id="regen-value" class="block text-right mt-2 text-gray-500">50%</span>
+            </div>
+
+            <!-- Traffic Density -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="traffic-select" class="block text-xl font-semibold text-gray-700 mb-2">Traffic Density</label>
+                <select id="traffic-select" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="low">Low</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="high">High</option>
+                </select>
+            </div>
+
+            <!-- Weather Condition -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="weather-select" class="block text-xl font-semibold text-gray-700 mb-2">Weather Condition</label>
+                <select id="weather-select" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="sunny">Sunny</option>
+                    <option value="rainy">Rainy</option>
+                    <option value="snowy">Snowy</option>
+                </select>
+            </div>
+
+            <!-- Road Type -->
+            <div class="bg-gray-100 p-6 rounded-xl border border-gray-200">
+                <label for="road-select" class="block text-xl font-semibold text-gray-700 mb-2">Road Type</label>
+                <select id="road-select" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="city">City</option>
+                    <option value="highway">Highway</option>
+                    <option value="mountain">Mountain</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Prediction Button -->
+        <div class="text-center mb-8">
+            <button id="predict-button" class="px-8 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 transform transition-transform hover:scale-105 active:scale-100 focus:outline-none focus:ring-4 focus:ring-blue-300">
+                Predict
+            </button>
+        </div>
+
+        <!-- Prediction Results Display -->
+        <div id="results-display" class="hidden text-center p-8 bg-blue-50 rounded-2xl border-2 border-blue-200 transform transition-all duration-300">
+            <h2 class="text-3xl font-bold text-blue-800 mb-4">Prediction Results</h2>
+            <div class="flex flex-col md:flex-row justify-around items-center space-y-4 md:space-y-0 md:space-x-4">
+                <div class="flex-1 bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <p class="text-xl font-medium text-gray-600">Predicted Energy Consumption</p>
+                    <p id="energy-output" class="text-5xl font-extrabold text-blue-600 mt-2">--</p>
+                    <p class="text-sm text-gray-400">($kWh/100km$)</p>
+                </div>
+                <div class="flex-1 bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <p class="text-xl font-medium text-gray-600">Remaining Battery Level</p>
+                    <p id="battery-output" class="text-5xl font-extrabold text-blue-600 mt-2">--</p>
+                    <p class="text-sm text-gray-400">(%)</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get all UI elements
+            const speedSlider = document.getElementById('speed-slider');
+            const speedValue = document.getElementById('speed-value');
+            const accelSlider = document.getElementById('accel-slider');
+            const accelValue = document.getElementById('accel-value');
+            const brakeSlider = document.getElementById('brake-slider');
+            const brakeValue = document.getElementById('brake-value');
+            const regenSlider = document.getElementById('regen-slider');
+            const regenValue = document.getElementById('regen-value');
+            const trafficSelect = document.getElementById('traffic-select');
+            const weatherSelect = document.getElementById('weather-select');
+            const roadSelect = document.getElementById('road-select');
+            const predictButton = document.getElementById('predict-button');
+            const resultsDisplay = document.getElementById('results-display');
+            const energyOutput = document.getElementById('energy-output');
+            const batteryOutput = document.getElementById('battery-output');
+
+            // --- UI Update Logic ---
+            // Update slider value displays dynamically
+            speedSlider.addEventListener('input', () => {
+                speedValue.textContent = `${speedSlider.value} km/h`;
+                // Hide results until a new prediction is made
+                resultsDisplay.classList.add('hidden');
+            });
+
+            accelSlider.addEventListener('input', () => {
+                accelValue.textContent = `${accelSlider.value} m/s^2`;
+                resultsDisplay.classList.add('hidden');
+            });
+
+            brakeSlider.addEventListener('input', () => {
+                brakeValue.textContent = brakeSlider.value;
+                resultsDisplay.classList.add('hidden');
+            });
+
+            regenSlider.addEventListener('input', () => {
+                regenValue.textContent = `${regenSlider.value}%`;
+                resultsDisplay.classList.add('hidden');
+            });
+
+            // Hide results when a dropdown changes
+            trafficSelect.addEventListener('change', () => resultsDisplay.classList.add('hidden'));
+            weatherSelect.addEventListener('change', () => resultsDisplay.classList.add('hidden'));
+            roadSelect.addEventListener('change', () => resultsDisplay.classList.add('hidden'));
+
+            // --- Prediction Logic ---
+            predictButton.addEventListener('click', () => {
+                // Get current values from all inputs
+                const speed = parseFloat(speedSlider.value);
+                const acceleration = parseFloat(accelSlider.value);
+                const brakeIntensity = parseFloat(brakeSlider.value);
+                const regenBrakingUsage = parseFloat(regenSlider.value);
+                const trafficDensity = trafficSelect.value;
+                const weatherCondition = weatherSelect.value;
+                const roadType = roadSelect.value;
+
+                // --- Placeholder Model Logic ---
+                // This is a dummy function. In a real application, you would
+                // call your actual machine learning model here with these inputs.
+                // For demonstration, we'll use a simple formula to simulate
+                // the effects of the variables.
+                const predict = (speed, acceleration, brake, regen, traffic, weather, road) => {
+                    let baseConsumption = 15; // Starting consumption in kWh/100km
+                    let baseBattery = 80;    // Starting battery level in %
+
+                    // Adjust consumption based on factors
+                    baseConsumption += (speed / 100) * 5; // Higher speed = more consumption
+                    baseConsumption += Math.abs(acceleration) * 2; // Aggressive driving
+                    baseConsumption -= (regen / 100) * 3; // Regen braking reduces consumption
+                    baseConsumption += brake * 0.5; // Heavy braking can be inefficient
+
+                    // Adjust based on categorical variables
+                    if (traffic === 'high') baseConsumption += 3;
+                    if (weather === 'snowy') baseConsumption += 4;
+                    if (weather === 'rainy') baseConsumption += 2;
+                    if (road === 'mountain') baseConsumption += 5;
+
+                    // Calculate a simple, hypothetical battery level change
+                    // This is for demonstration and not a real-world calculation
+                    const consumptionPerKm = baseConsumption / 100;
+                    const hypotheticalDistance = 10; // Assume a 10km trip for this prediction
+                    const batteryDrop = (consumptionPerKm * hypotheticalDistance) / 0.6; // Assuming 60kWh total battery
+
+                    const predictedBattery = Math.max(0, baseBattery - batteryDrop);
+
+                    return {
+                        energyConsumption: baseConsumption.toFixed(2),
+                        batteryLevel: predictedBattery.toFixed(0)
+                    };
+                };
+
+                // Call the placeholder prediction function
+                const prediction = predict(
+                    speed,
+                    acceleration,
+                    brakeIntensity,
+                    regenBrakingUsage,
+                    trafficDensity,
+                    weatherCondition,
+                    roadType
+                );
+
+                // Display the results
+                energyOutput.textContent = prediction.energyConsumption;
+                batteryOutput.textContent = prediction.batteryLevel;
+                resultsDisplay.classList.remove('hidden');
+                resultsDisplay.scrollIntoView({ behavior: 'smooth' }); // Scroll to the results
+            });
+        });
+    </script>
+</body>
+</html>
