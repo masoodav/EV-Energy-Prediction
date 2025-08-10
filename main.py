@@ -8,7 +8,6 @@ import seaborn as sns
 from itertools import combinations
 import argparse
 
-# Import all data preprocessing and feature engineering functions
 from data_collection.data_loader import load_kaggle_dataset
 from data_preprocessing.data_preprocessor import (
     find_missing_data,
@@ -71,8 +70,6 @@ if __name__ == "__main__":
     df = load_kaggle_dataset(dataset_id, file, "dataset")
 
     if df is not None:
-        # Optional: Clean non-standard missing values before analysis
-        df = find_and_replace_non_standard_missing_values(df)
 
         # Step 1: Perform initial data exploration
         print("\n--- Running Data Exploration ---")
@@ -134,7 +131,7 @@ if __name__ == "__main__":
         
         # Step 7: Enhanced Hyperparameter Tuning and Final Model Selection
         print("\n" + "="*80)
-        print("🚀 STARTING ENHANCED MODEL TRAINING PIPELINE")
+        print("STARTING ENHANCED MODEL TRAINING PIPELINE")
         print("="*80)
         
         # Use the final train/test split from TSCV for tuning and final evaluation
@@ -143,10 +140,10 @@ if __name__ == "__main__":
         # Get the last fold, which is the most recent data
         X_train, X_test, y_train, y_test = list(tscv_splits)[-1]
         
-        print(f"📊 Training set shape: {X_train.shape}")
-        print(f"📊 Test set shape: {X_test.shape}")
-        print(f"🎯 Target variable: {target_variable}")
-        print(f"🔧 Features: {selected_features}")
+        print(f"Training set shape: {X_train.shape}")
+        print(f"Test set shape: {X_test.shape}")
+        print(f"Target variable: {target_variable}")
+        print(f"Features: {selected_features}")
         
         # Run the comprehensive final model training pipeline
         final_model, final_rmse, model_results = run_final_model_training(
@@ -155,27 +152,10 @@ if __name__ == "__main__":
         
         # Display final summary
         print("\n" + "="*80)
-        print("🎉 PIPELINE COMPLETED SUCCESSFULLY!")
+        print("PIPELINE COMPLETED SUCCESSFULLY!")
         print("="*80)
-        print(f"✅ Final Production Model: Stacking Ensemble")
-        print(f"📈 Final RMSE: {final_rmse:.4f}")
-        print(f"💾 Models saved for A/B testing")
-        print(f"📁 Check 'saved_models' directory for model files")
-        
-        # Optional: Show how to load and use the models
-        print("\n📚 Model Usage Examples:")
-        print("="*40)
-        lgb_file = model_results['model_files']['lgb_file']
-        stack_file = model_results['model_files']['stack_file']
-        
-        print(f"# Load LightGBM model:")
-        print(f"# lgb_data = load_model_for_prediction('{lgb_file}')")
-        print(f"# lgb_model = lgb_data['model']")
-        print(f"")
-        print(f"# Load Stacking Ensemble model:")
-        print(f"# stack_data = load_model_for_prediction('{stack_file}')")
-        print(f"# stack_model = stack_data['model']")
-        print(f"")
-        print(f"# Make predictions:")
-        print(f"# predictions = stack_model.predict(new_data)")
+        print(f"Final Production Model: {final_model.__class__.__name__}")
+        print(f"Final RMSE: {final_rmse:.4f}")
+        print(f"Models saved for A/B testing")
+        print(f"Check 'saved_models' directory for model files")
     

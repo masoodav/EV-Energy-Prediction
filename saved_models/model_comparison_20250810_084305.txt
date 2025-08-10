@@ -1,0 +1,12 @@
+Model Comparison Results - 20250810_084305
+==================================================
+
+LightGBM RMSE: 0.2781
+Stacking Ensemble RMSE: 0.2817
+
+Best Model: LightGBM
+Performance Improvement: 0.0036
+
+Feature Names: ['instantaneous_power_proxy', 'total_braking_force', 'traffic_density', 'weather_condition_Rainy', 'weather_condition_Snowy', 'weather_condition_Sunny', 'road_type_Rural', 'road_type_Urban']
+
+LightGBM Parameters: {'subsample': 0.9, 'reg_lambda': 0.0, 'reg_alpha': 0.0, 'num_leaves': 31, 'n_estimators': 1000, 'min_split_gain': 0.2, 'min_child_samples': 30, 'max_depth': 4, 'learning_rate': 0.1, 'colsample_bytree': 0.9}

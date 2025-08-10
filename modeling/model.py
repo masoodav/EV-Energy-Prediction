@@ -307,7 +307,7 @@ def save_models_for_ab_testing(lgb_model, stack_model, lgb_params, lgb_rmse, sta
         f.write(f"Feature Names: {feature_names}\n\n")
         f.write(f"LightGBM Parameters: {lgb_params}\n")
     
-    print(f"\n📁 Models saved for A/B testing:")
+    print(f"\nModels saved for A/B testing:")
     print(f"   LightGBM: {lgb_filename}")
     print(f"   Stacking: {stack_filename}")
     print(f"   Comparison: {comparison_filename}")
@@ -327,22 +327,22 @@ def run_final_model_training(X_train, y_train, X_test, y_test, feature_names):
     Run the complete model training pipeline with improvements
     """
     print("\n" + "="*60)
-    print("🚀 FINAL MODEL TRAINING PIPELINE")
+    print("FINAL MODEL TRAINING PIPELINE")
     print("="*60)
     
     # Step 1: Find best random state
-    print("\n📊 Step 1: Finding optimal random state...")
+    print("\nStep 1: Finding optimal random state...")
     best_random_state = test_different_random_states(X_train, y_train, X_test, y_test)
     
     # Step 2: Train individual LightGBM
-    print(f"\n🌟 Step 2: Training LightGBM with optimal random state ({best_random_state})...")
+    print(f"\nStep 2: Training LightGBM with optimal random state ({best_random_state})...")
     lgb_model, lgb_params, lgb_rmse = tune_lightgbm_model(
         X_train, y_train, X_test, y_test, 
         random_state=best_random_state
     )
     
     # Step 3: Train stacking ensemble
-    print(f"\n🎯 Step 3: Training Stacking Ensemble...")
+    print(f"\nStep 3: Training Stacking Ensemble...")
     stack_model, stack_rmse = tune_model_stack(
         X_train, y_train, X_test, y_test,
         random_state=best_random_state
@@ -350,7 +350,7 @@ def run_final_model_training(X_train, y_train, X_test, y_test, feature_names):
     
     # Step 4: Compare and select final model
     print("\n" + "="*60)
-    print("📈 MODEL COMPARISON RESULTS")
+    print("MODEL COMPARISON RESULTS")
     print("="*60)
     print(f"LightGBM RMSE:      {lgb_rmse:.4f}")
     print(f"Stacking RMSE:      {stack_rmse:.4f}")
@@ -359,18 +359,18 @@ def run_final_model_training(X_train, y_train, X_test, y_test, feature_names):
     improvement_pct = (improvement / max(lgb_rmse, stack_rmse)) * 100
     
     if stack_rmse < lgb_rmse:
-        print(f"✅ Stacking Ensemble wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
+        print(f"Stacking Ensemble wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
         final_model = stack_model
         final_rmse = stack_rmse
         model_type = "Stacking Ensemble"
     else:
-        print(f"✅ LightGBM wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
+        print(f"LightGBM wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
         final_model = lgb_model
         final_rmse = lgb_rmse
         model_type = "LightGBM"
     
     # Step 5: Save models for A/B testing
-    print(f"\n💾 Step 4: Saving models for A/B testing...")
+    print(f"\nStep 4: Saving models for A/B testing...")
     lgb_file, stack_file, comparison_file = save_models_for_ab_testing(
         lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse, feature_names
     )
