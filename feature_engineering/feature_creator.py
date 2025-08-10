@@ -46,6 +46,6 @@ def encode_categorical_features(df: pd.DataFrame, categorical_cols: list) -> pd.
     """
     print("\n--- Encoding Categorical Features ---")
     # Use pandas get_dummies for one-hot encoding
-    df = pd.get_dummies(df, columns=categorical_cols, drop_first=True, dtype=int)
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=False, dtype=int)
     print("  Categorical features have been one-hot encoded.")
     return df

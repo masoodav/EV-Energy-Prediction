@@ -51,20 +51,63 @@ def evaluate_multiple_models(X_train: pd.DataFrame, y_train: pd.Series, X_test: 
     return mse_results
 
 
-def run_model_comparison_pipeline(df: pd.DataFrame, features: list, target_variable: str, n_splits: int = 5):
+def prepare_train_test_holdout_splits(df: pd.DataFrame, features: list, target_variable: str, 
+                                    train_ratio: float = 0.7, test_ratio: float = 0.2):
     """
-    Orchestrates the entire model comparison pipeline using time-series cross-validation.
-
-    This function sets up the models to be tested, runs the TSCV loop, and
-    aggregates the results to provide a final performance comparison.
-
+    Prepares train/test/holdout splits for time series data maintaining chronological order.
+    The holdout set is completely reserved for final model validation after model selection.
+    
     Args:
         df (pd.DataFrame): The preprocessed DataFrame containing features and target.
         features (list): A list of feature column names.
         target_variable (str): The name of the target column.
+        train_ratio (float): Proportion of data for training (default 0.7).
+        test_ratio (float): Proportion of data for testing/model selection (default 0.2).
+                          Holdout ratio will be 1 - train_ratio - test_ratio.
+    
+    Returns:
+        tuple: (X_train, X_test, X_holdout, y_train, y_test, y_holdout)
+    """
+    n_samples = len(df)
+    train_end = int(n_samples * train_ratio)
+    test_end = int(n_samples * (train_ratio + test_ratio))
+    
+    # Split data chronologically
+    train_data = df.iloc[:train_end]
+    test_data = df.iloc[train_end:test_end]
+    holdout_data = df.iloc[test_end:]
+    
+    # Prepare feature and target sets
+    X_train = train_data[features]
+    X_test = test_data[features]
+    X_holdout = holdout_data[features]
+    
+    y_train = train_data[target_variable]
+    y_test = test_data[target_variable]
+    y_holdout = holdout_data[target_variable]
+    
+    holdout_ratio = 1 - train_ratio - test_ratio
+    
+    print(f"Data split sizes:")
+    print(f"  Train: {len(X_train)} samples ({len(X_train)/n_samples:.1%}) - for model training")
+    print(f"  Test: {len(X_test)} samples ({len(X_test)/n_samples:.1%}) - for model selection & tuning")
+    print(f"  Holdout: {len(X_holdout)} samples ({len(X_holdout)/n_samples:.1%}) - RESERVED for final validation")
+    
+    return X_train, X_test, X_holdout, y_train, y_test, y_holdout
+
+
+def run_model_comparison_pipeline(df: pd.DataFrame, features: list, target_variable: str, n_splits: int = 5):
+    """
+    Orchestrates the entire model comparison pipeline using time-series cross-validation.
+    This uses only the train+test portion of the data (holdout is completely reserved).
+
+    Args:
+        df (pd.DataFrame): The preprocessed DataFrame containing features and target (WITHOUT holdout data).
+        features (list): A list of feature column names.
+        target_variable (str): The name of the target column.
         n_splits (int): The number of time-series cross-validation splits to use.
     """
-    print("\n--- Time-Series Cross-Validation and Model Training ---")
+    print("\n--- Time-Series Cross-Validation and Model Training (Holdout Data Excluded) ---")
 
     # Define a dictionary of models to test
     models_to_test = {
@@ -93,11 +136,13 @@ def run_model_comparison_pipeline(df: pd.DataFrame, features: list, target_varia
         print(f"\n{name} Results:")
         print(f"  Test MSEs for each fold: {results}")
         print(f"  Average Test MSE: {np.mean(results):.4f}")
+        print(f"  Average Test RMSE: {np.sqrt(np.mean(results)):.4f}")
 
 
 def test_different_random_states(X_train, y_train, X_test, y_test, random_states=[42, 123, 555, 777, 999]):
     """
     Tests model performance with different random states to ensure robustness.
+    Uses only train/test data - holdout is completely reserved.
     """
     print("\n--- Testing Model Robustness with Different Random States ---")
     results = []
@@ -120,6 +165,7 @@ def test_different_random_states(X_train, y_train, X_test, y_test, random_states
     
     return best_result['random_state']
 
+
 def create_advanced_model_stack(random_state=42):
     """
     Creates a stacking ensemble of multiple advanced models with improved parameters.
@@ -128,7 +174,7 @@ def create_advanced_model_stack(random_state=42):
     estimators = [
         ('lgb', LGBMRegressor(
             n_estimators=1000,
-            learning_rate=0.05,  # Increased from 0.01
+            learning_rate=0.05,
             max_depth=6,
             num_leaves=48,
             subsample=0.9,
@@ -140,7 +186,7 @@ def create_advanced_model_stack(random_state=42):
         )),
         ('xgb', XGBRegressor(
             n_estimators=1000,
-            learning_rate=0.05,  # Increased from 0.01
+            learning_rate=0.05,
             max_depth=6,
             subsample=0.9,
             colsample_bytree=0.9,
@@ -150,7 +196,7 @@ def create_advanced_model_stack(random_state=42):
         )),
         ('cat', CatBoostRegressor(
             iterations=1000,
-            learning_rate=0.05,  # Increased from 0.01
+            learning_rate=0.05,
             depth=6,
             l2_leaf_reg=0.1,
             verbose=False,
@@ -172,9 +218,11 @@ def create_advanced_model_stack(random_state=42):
     )
     return stack
 
+
 def tune_model_stack(X_train, y_train, X_test, y_test, random_state=42):
     """
     Trains and evaluates a stacking ensemble model with feature name handling.
+    Uses only train/test data - holdout is reserved.
     """
     print("\n--- Training Stacking Ensemble ---")
     model = create_advanced_model_stack(random_state)
@@ -193,13 +241,16 @@ def tune_model_stack(X_train, y_train, X_test, y_test, random_state=42):
     print(f"Stacking Ensemble MSE: {mse:.4f}")
     return model, rmse
 
+
 def rmse_scorer(y_true, y_pred):
     """Custom RMSE scorer"""
     return np.sqrt(mean_squared_error(y_true, y_pred))
 
+
 def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     """
-    Enhanced LightGBM tuning with improved parameters and learning rate ranges
+    Enhanced LightGBM tuning with improved parameters and learning rate ranges.
+    Uses only train/test data - holdout is reserved.
     """
     print(f"\n--- Quick Tuning LightGBM (random_state={random_state}) ---")
     
@@ -207,13 +258,13 @@ def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     lgbm = LGBMRegressor(
         random_state=random_state,
         verbose=-1,
-        objective='regression',  # Changed from huber to standard regression
+        objective='regression',
     )
     
     # Enhanced parameter space with higher learning rates
     param_distributions = {
         'n_estimators': [1000, 1500, 2000],
-        'learning_rate': [0.01, 0.02, 0.05, 0.1, 0.15],  # Increased learning rate range
+        'learning_rate': [0.01, 0.02, 0.05, 0.1, 0.15],
         'max_depth': [4, 5, 6, 7],
         'num_leaves': [31, 48, 64],
         'subsample': [0.8, 0.9, 1.0],
@@ -230,7 +281,7 @@ def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     random_search = RandomizedSearchCV(
         estimator=lgbm,
         param_distributions=param_distributions,
-        n_iter=25,  # Increased iterations
+        n_iter=25,
         cv=3,
         scoring=rmse_scoring,
         random_state=random_state,
@@ -245,13 +296,13 @@ def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     best_params = random_search.best_params_
     final_model = LGBMRegressor(**best_params, random_state=random_state, verbose=-1)
     
-    # Fit with early stopping using validation set
+    # Fit with early stopping using test set for evaluation
     final_model.fit(
         X_train, y_train,
         eval_set=[(X_test, y_test)],
         eval_metric='rmse',
         callbacks=[
-            lgb.early_stopping(stopping_rounds=100),  # Increased patience
+            lgb.early_stopping(stopping_rounds=100),
             lgb.log_evaluation(period=200)
         ]
     )
@@ -260,14 +311,73 @@ def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     y_pred = final_model.predict(X_test)
     final_rmse = rmse_scorer(y_test, y_pred)
     
-    print(f"\n✅ Best Parameters: {best_params}")
+    print(f"\n Best Parameters: {best_params}")
     print(f"Final RMSE: {final_rmse:.4f}")
     
     return final_model, best_params, final_rmse
 
-def save_models_for_ab_testing(lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse, feature_names):
+
+def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
     """
-    Save both models for A/B testing with metadata
+    Make predictions on the completely unseen holdout dataset.
+    
+    Args:
+        model: Trained model
+        X_holdout: Holdout features
+        y_holdout: Holdout target values
+        model_name: Name of the model for reporting
+    
+    Returns:
+        dict: Dictionary containing predictions and metrics
+    """
+    print(f"\n--- Making Predictions on Holdout Dataset with {model_name} ---")
+    
+    # Handle numpy conversion for ensemble models
+    if hasattr(X_holdout, 'values'):
+        X_holdout_array = X_holdout.values
+    else:
+        X_holdout_array = X_holdout
+    
+    # Make predictions
+    y_holdout_pred = model.predict(X_holdout_array)
+    
+    # Calculate metrics
+    holdout_mse = mean_squared_error(y_holdout, y_holdout_pred)
+    holdout_rmse = np.sqrt(holdout_mse)
+    
+    # Calculate additional metrics
+    mae = np.mean(np.abs(y_holdout - y_holdout_pred))
+    mape = np.mean(np.abs((y_holdout - y_holdout_pred) / y_holdout)) * 100
+    
+    print(f" HOLDOUT DATASET PERFORMANCE ({model_name}):")
+    print(f"   RMSE: {holdout_rmse:.4f}")
+    print(f"   MSE: {holdout_mse:.4f}")
+    print(f"   MAE: {mae:.4f}")
+    print(f"   MAPE: {mape:.2f}%")
+    
+    # Residual analysis
+    residuals = y_holdout - y_holdout_pred
+    print(f"   Mean Residual: {np.mean(residuals):.4f}")
+    print(f"   Std Residual: {np.std(residuals):.4f}")
+    print(f"   Min Residual: {np.min(residuals):.4f}")
+    print(f"   Max Residual: {np.max(residuals):.4f}")
+    
+    return {
+        'predictions': y_holdout_pred,
+        'actual': y_holdout,
+        'rmse': holdout_rmse,
+        'mse': holdout_mse,
+        'mae': mae,
+        'mape': mape,
+        'residuals': residuals,
+        'model_name': model_name
+    }
+
+
+def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse, 
+                                  holdout_results, feature_names):
+    """
+    Save both models and holdout validation results for production deployment.
     """
     # Create models directory if it doesn't exist
     os.makedirs('saved_models', exist_ok=True)
@@ -279,7 +389,8 @@ def save_models_for_ab_testing(lgb_model, stack_model, lgb_params, lgb_rmse, sta
     joblib.dump({
         'model': lgb_model,
         'params': lgb_params,
-        'rmse': lgb_rmse,
+        'test_rmse': lgb_rmse,
+        'holdout_results': holdout_results.get('lgb', {}),
         'feature_names': feature_names,
         'model_type': 'LightGBM',
         'timestamp': timestamp
@@ -289,101 +400,181 @@ def save_models_for_ab_testing(lgb_model, stack_model, lgb_params, lgb_rmse, sta
     stack_filename = f'saved_models/stacking_model_{timestamp}.joblib'
     joblib.dump({
         'model': stack_model,
-        'rmse': stack_rmse,
+        'test_rmse': stack_rmse,
+        'holdout_results': holdout_results.get('stack', {}),
         'feature_names': feature_names,
         'model_type': 'Stacking_Ensemble',
         'timestamp': timestamp
     }, stack_filename)
     
-    # Save comparison metadata
-    comparison_filename = f'saved_models/model_comparison_{timestamp}.txt'
-    with open(comparison_filename, 'w') as f:
-        f.write(f"Model Comparison Results - {timestamp}\n")
-        f.write("="*50 + "\n\n")
-        f.write(f"LightGBM RMSE: {lgb_rmse:.4f}\n")
-        f.write(f"Stacking Ensemble RMSE: {stack_rmse:.4f}\n\n")
-        f.write(f"Best Model: {'Stacking Ensemble' if stack_rmse < lgb_rmse else 'LightGBM'}\n")
-        f.write(f"Performance Improvement: {abs(lgb_rmse - stack_rmse):.4f}\n\n")
+    # Save comprehensive comparison and holdout results
+    results_filename = f'saved_models/model_comparison_and_holdout_{timestamp}.txt'
+    with open(results_filename, 'w') as f:
+        f.write(f"Model Comparison and Holdout Validation Results - {timestamp}\n")
+        f.write("="*70 + "\n\n")
+        
+        f.write("MODEL SELECTION RESULTS (Test Set):\n")
+        f.write("-"*40 + "\n")
+        f.write(f"LightGBM Test RMSE: {lgb_rmse:.4f}\n")
+        f.write(f"Stacking Ensemble Test RMSE: {stack_rmse:.4f}\n\n")
+        
+        # Determine best model
+        best_model_name = 'Stacking Ensemble' if stack_rmse < lgb_rmse else 'LightGBM'
+        performance_diff = abs(lgb_rmse - stack_rmse)
+        f.write(f"Selected Model: {best_model_name}\n")
+        f.write(f"Performance Difference: {performance_diff:.4f} RMSE\n\n")
+        
+        f.write("HOLDOUT VALIDATION RESULTS (Completely Unseen Data):\n")
+        f.write("-"*50 + "\n")
+        
+        for model_key, results in holdout_results.items():
+            model_name = results['model_name']
+            f.write(f"{model_name}:\n")
+            f.write(f"  RMSE: {results['rmse']:.4f}\n")
+            f.write(f"  MAE: {results['mae']:.4f}\n")
+            f.write(f"  MAPE: {results['mape']:.2f}%\n")
+            f.write(f"  Mean Residual: {np.mean(results['residuals']):.4f}\n")
+            f.write(f"  Std Residual: {np.std(results['residuals']):.4f}\n\n")
+        
         f.write(f"Feature Names: {feature_names}\n\n")
         f.write(f"LightGBM Parameters: {lgb_params}\n")
     
-    print(f"\nModels saved for A/B testing:")
+    print(f"\nModels and holdout results saved:")
     print(f"   LightGBM: {lgb_filename}")
     print(f"   Stacking: {stack_filename}")
-    print(f"   Comparison: {comparison_filename}")
+    print(f"   Results: {results_filename}")
     
-    return lgb_filename, stack_filename, comparison_filename
+    return lgb_filename, stack_filename, results_filename
+
 
 def load_model_for_prediction(model_path):
     """
     Load a saved model for prediction
     """
     model_data = joblib.load(model_path)
-    print(f"Loaded {model_data['model_type']} model (RMSE: {model_data['rmse']:.4f})")
+    print(f"Loaded {model_data['model_type']} model")
+    print(f"  Test RMSE: {model_data['test_rmse']:.4f}")
+    if 'holdout_results' in model_data and model_data['holdout_results']:
+        holdout_rmse = model_data['holdout_results']['rmse']
+        print(f"  Holdout RMSE: {holdout_rmse:.4f}")
     return model_data
 
-def run_final_model_training(X_train, y_train, X_test, y_test, feature_names):
+
+def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_holdout, y_holdout, feature_names):
     """
-    Run the complete model training pipeline with improvements
-    """
-    print("\n" + "="*60)
-    print("FINAL MODEL TRAINING PIPELINE")
-    print("="*60)
+    Run the complete model training pipeline with holdout validation.
     
-    # Step 1: Find best random state
-    print("\nStep 1: Finding optimal random state...")
+    The holdout dataset is ONLY used at the very end for final validation predictions.
+    """
+    print("\n" + "="*80)
+    print("FINAL MODEL TRAINING PIPELINE WITH HOLDOUT VALIDATION")
+    print("="*80)
+    
+    # Step 1: Find best random state using only train/test data
+    print("\nStep 1: Finding optimal random state (using train/test data only)...")
     best_random_state = test_different_random_states(X_train, y_train, X_test, y_test)
     
-    # Step 2: Train individual LightGBM
+    # Step 2: Train individual LightGBM using only train/test data
     print(f"\nStep 2: Training LightGBM with optimal random state ({best_random_state})...")
     lgb_model, lgb_params, lgb_rmse = tune_lightgbm_model(
         X_train, y_train, X_test, y_test, 
         random_state=best_random_state
     )
     
-    # Step 3: Train stacking ensemble
+    # Step 3: Train stacking ensemble using only train/test data
     print(f"\nStep 3: Training Stacking Ensemble...")
     stack_model, stack_rmse = tune_model_stack(
         X_train, y_train, X_test, y_test,
         random_state=best_random_state
     )
     
-    # Step 4: Compare and select final model
-    print("\n" + "="*60)
-    print("MODEL COMPARISON RESULTS")
-    print("="*60)
-    print(f"LightGBM RMSE:      {lgb_rmse:.4f}")
-    print(f"Stacking RMSE:      {stack_rmse:.4f}")
+    # Step 4: Select best model based on test performance
+    print("\n" + "="*80)
+    print("MODEL SELECTION RESULTS (Test Set)")
+    print("="*80)
+    print(f"LightGBM Test RMSE:      {lgb_rmse:.4f}")
+    print(f"Stacking Test RMSE:      {stack_rmse:.4f}")
     
     improvement = abs(lgb_rmse - stack_rmse)
     improvement_pct = (improvement / max(lgb_rmse, stack_rmse)) * 100
     
     if stack_rmse < lgb_rmse:
-        print(f"Stacking Ensemble wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
-        final_model = stack_model
-        final_rmse = stack_rmse
-        model_type = "Stacking Ensemble"
+        print(f"🏆 Stacking Ensemble selected (improvement: {improvement:.4f} RMSE, {improvement_pct:.1f}%)")
+        best_model = stack_model
+        best_model_name = "Stacking Ensemble"
     else:
-        print(f"LightGBM wins by {improvement:.4f} RMSE ({improvement_pct:.1f}% improvement)")
-        final_model = lgb_model
-        final_rmse = lgb_rmse
-        model_type = "LightGBM"
+        print(f"🏆 LightGBM selected (improvement: {improvement:.4f} RMSE, {improvement_pct:.1f}%)")
+        best_model = lgb_model
+        best_model_name = "LightGBM"
     
-    # Step 5: Save models for A/B testing
-    print(f"\nStep 4: Saving models for A/B testing...")
-    lgb_file, stack_file, comparison_file = save_models_for_ab_testing(
-        lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse, feature_names
+    # Step 5: NOW use the holdout dataset for final validation
+    print("\n" + "="*80)
+    print("HOLDOUT DATASET VALIDATION (COMPLETELY UNSEEN DATA)")
+    print("="*80)
+    print("  This is the FIRST TIME these models see the holdout data!")
+    
+    # Test both models on holdout data
+    holdout_results = {}
+    
+    print(f"\nTesting LightGBM on holdout data...")
+    holdout_results['lgb'] = make_holdout_predictions(
+        lgb_model, X_holdout, y_holdout, "LightGBM"
     )
     
-
-    return stack_model, stack_rmse, {
+    print(f"\nTesting Stacking Ensemble on holdout data...")
+    holdout_results['stack'] = make_holdout_predictions(
+        stack_model, X_holdout, y_holdout, "Stacking Ensemble"
+    )
+    
+    # Step 6: Final performance comparison
+    print("\n" + "="*80)
+    print("FINAL PERFORMANCE COMPARISON")
+    print("="*80)
+    
+    lgb_holdout_rmse = holdout_results['lgb']['rmse']
+    stack_holdout_rmse = holdout_results['stack']['rmse']
+    
+    print(f"{'Model':<20} {'Test RMSE':<12} {'Holdout RMSE':<15} {'Difference':<12}")
+    print(f"{'-'*65}")
+    print(f"{'LightGBM':<20} {lgb_rmse:<12.4f} {lgb_holdout_rmse:<15.4f} {abs(lgb_rmse - lgb_holdout_rmse):<12.4f}")
+    print(f"{'Stacking Ensemble':<20} {stack_rmse:<12.4f} {stack_holdout_rmse:<15.4f} {abs(stack_rmse - stack_holdout_rmse):<12.4f}")
+    
+    # Generalization analysis
+    lgb_generalization_gap = abs(lgb_rmse - lgb_holdout_rmse)
+    stack_generalization_gap = abs(stack_rmse - stack_holdout_rmse)
+    
+    print(f"\n Generalization Analysis:")
+    if lgb_generalization_gap < 0.01:
+        print(f"    LightGBM: Excellent generalization (gap: {lgb_generalization_gap:.4f})")
+    elif lgb_generalization_gap < 0.05:
+        print(f"    LightGBM: Good generalization (gap: {lgb_generalization_gap:.4f})")
+    else:
+        print(f"     LightGBM: Poor generalization (gap: {lgb_generalization_gap:.4f})")
+    
+    if stack_generalization_gap < 0.01:
+        print(f"    Stacking: Excellent generalization (gap: {stack_generalization_gap:.4f})")
+    elif stack_generalization_gap < 0.05:
+        print(f"    Stacking: Good generalization (gap: {stack_generalization_gap:.4f})")
+    else:
+        print(f"     Stacking: Poor generalization (gap: {stack_generalization_gap:.4f})")
+    
+    # Step 7: Save everything
+    print(f"\nStep 7: Saving models and holdout results...")
+    lgb_file, stack_file, results_file = save_models_and_holdout_results(
+        lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse,
+        holdout_results, feature_names
+    )
+    
+    return best_model, best_model_name, holdout_results, {
         'lgb_model': lgb_model,
-        'lgb_rmse': lgb_rmse,
+        'lgb_test_rmse': lgb_rmse,
+        'lgb_holdout_rmse': lgb_holdout_rmse,
         'stack_model': stack_model,
-        'stack_rmse': stack_rmse,
+        'stack_test_rmse': stack_rmse,
+        'stack_holdout_rmse': stack_holdout_rmse,
         'model_files': {
             'lgb_file': lgb_file,
             'stack_file': stack_file,
-            'comparison_file': comparison_file
+            'results_file': results_file
         }
     }
