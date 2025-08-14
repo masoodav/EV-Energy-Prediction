@@ -1,0 +1,30 @@
+Model Comparison and Holdout Validation Results - 20250810_122931
+======================================================================
+
+MODEL SELECTION RESULTS (Test Set):
+----------------------------------------
+LightGBM Test RMSE: 0.2874
+Stacking Ensemble Test RMSE: 0.2946
+
+Selected Model: LightGBM
+Performance Difference: 0.0072 RMSE
+
+HOLDOUT VALIDATION RESULTS (Completely Unseen Data):
+--------------------------------------------------
+LightGBM:
+  RMSE: 0.2756
+  MAE: 0.2343
+  MAPE: 62.35%
+  Mean Residual: -0.0016
+  Std Residual: 0.2755
+
+Stacking Ensemble:
+  RMSE: 0.2821
+  MAE: 0.2393
+  MAPE: 63.58%
+  Mean Residual: -0.0015
+  Std Residual: 0.2821
+
+Feature Names: ['instantaneous_power_proxy', 'total_braking_force', 'traffic_density', 'weather_condition_Foggy', 'weather_condition_Rainy', 'weather_condition_Snowy', 'weather_condition_Sunny', 'road_type_Highway', 'road_type_Rural', 'road_type_Urban']
+
+LightGBM Parameters: {'subsample': 0.9, 'reg_lambda': 0.1, 'reg_alpha': 0.0, 'num_leaves': 48, 'n_estimators': 2000, 'min_split_gain': 0.2, 'min_child_samples': 30, 'max_depth': 4, 'learning_rate': 0.01, 'colsample_bytree': 1.0}

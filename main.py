@@ -45,6 +45,102 @@ from exploratory_data_analysis.data_analysis import (
     create_box_plots_for_categorical_vs_target
 )
 
+def generate_production_report(model_results, best_model_name, df, X_train, X_test, X_holdout):
+    """
+    Generates a comprehensive analysis and production recommendation report.
+    """
+    print("\n" + "="*80)
+    print("COMPREHENSIVE ANALYSIS AND PRODUCTION RECOMMENDATIONS")
+    print("="*80)
+    
+    # Extract results for analysis
+    lgb_test_rmse = model_results['lgb_test_rmse']
+    lgb_holdout_rmse = model_results['lgb_holdout_rmse']
+    stack_test_rmse = model_results['stack_test_rmse'] 
+    stack_holdout_rmse = model_results['stack_holdout_rmse']
+    
+    # Model selection summary
+    print(f"\n SELECTED MODEL: {best_model_name}")
+    print(f"   Selected based on test set performance during training")
+    
+    # Holdout validation summary
+    print(f"\n HOLDOUT VALIDATION RESULTS (Real-world Performance Estimate):")
+    print(f"   LightGBM Holdout RMSE:      {lgb_holdout_rmse:.4f}")
+    print(f"   Stacking Holdout RMSE:      {stack_holdout_rmse:.4f}")
+    
+    # Generalization analysis
+    lgb_generalization_gap = lgb_test_rmse - lgb_holdout_rmse
+    stack_generalization_gap = stack_test_rmse - stack_holdout_rmse
+    
+    print(f"\n GENERALIZATION ANALYSIS:")
+    print(f"   LightGBM:")
+    print(f"     Test RMSE: {lgb_test_rmse:.4f}")
+    print(f"     Holdout RMSE: {lgb_holdout_rmse:.4f}")
+    print(f"     Gap: {abs(lgb_generalization_gap):.4f}")
+    
+    print(f"   Stacking Ensemble:")
+    print(f"     Test RMSE: {stack_test_rmse:.4f}")
+    print(f"     Holdout RMSE: {stack_holdout_rmse:.4f}")
+    print(f"     Gap: {abs(stack_generalization_gap):.4f}")
+    
+    # Best model analysis
+    if best_model_name == "LightGBM":
+        final_holdout_rmse = lgb_holdout_rmse
+        generalization_gap = lgb_generalization_gap
+    else:
+        final_holdout_rmse = stack_holdout_rmse
+        generalization_gap = stack_generalization_gap
+    
+    # Performance assessment
+    print(f"\n PERFORMANCE ASSESSMENT:")
+    if generalization_gap < 0:
+        print(f"    EXCELLENT: Model performed even better on the holdout set (Gap: {generalization_gap:.4f}). This is a strong sign of a robust model.")
+        reliability = "High"
+    elif abs(generalization_gap) < 0.02:
+        print(f"    GOOD: Very low generalization gap ({abs(generalization_gap):.4f}). The model generalizes well.")
+        reliability = "Good"
+    elif abs(generalization_gap) < 0.05:
+        print(f"     FAIR: Moderate generalization gap ({abs(generalization_gap):.4f}).")
+        reliability = "Fair"
+    else:
+        print(f"    POOR: High generalization gap ({abs(generalization_gap):.4f}).")
+        reliability = "Poor"
+    
+    # Data split assessment
+    print(f"\n DATA SPLIT ASSESSMENT:")
+    print(f"   Training samples: {len(X_train)} ({len(X_train)/len(df):.1%})")
+    print(f"   Test samples: {len(X_test)} ({len(X_test)/len(df):.1%})")
+    print(f"   Holdout samples: {len(X_holdout)} ({len(X_holdout)/len(df):.1%})")
+    
+    if len(X_holdout) < 50:
+        print(f"     Warning: Very small holdout set - consider increasing holdout ratio for more reliable validation.")
+    elif len(X_holdout) < 100:
+        print(f"     Warning: Small holdout set - results may be less reliable.")
+    else:
+        print(f"    Adequate holdout set size for reliable validation.")
+    
+    # Production deployment recommendations
+    print(f"\n PRODUCTION DEPLOYMENT RECOMMENDATIONS:")
+    print(f"   1.  Deploy: {best_model_name}")
+    print(f"   2.  Expected Performance: ~{final_holdout_rmse:.4f} RMSE")
+    print(f"   3.  Model Reliability: {reliability}")
+    print(f"   4.  Performance Monitoring:")
+    print(f"      • Set performance alert if production RMSE exceeds {final_holdout_rmse + 0.02:.4f}")
+    print(f"      • Consider retraining if production RMSE exceeds {final_holdout_rmse + 0.05:.4f}")
+    print(f"   5.  A/B Testing:")
+    print(f"      • Both models are saved and can be used for A/B testing to compare live performance.")
+    print(f"   6.  Model Validation:")
+    print(f"      • The Holdout RMSE represents the most realistic estimate of performance on new, unseen data.")
+    
+    # Risk assessment
+    print(f"\n  RISK ASSESSMENT:")
+    if reliability == "Poor":
+        print(f"   • HIGH: Significant performance drop was observed on unseen data. Recommend additional validation before full production deployment.")
+    elif reliability == "Fair":
+        print(f"   • MEDIUM: Some performance drop expected. Monitor closely in production.")
+    else:
+        print(f"   • LOW: Performance is consistent and reliable. Ready for production deployment.")
+
 ##############################################################
 if __name__ == "__main__":
 ##############################################################
@@ -184,113 +280,23 @@ if __name__ == "__main__":
         
         # Run the comprehensive model training pipeline with holdout validation
         best_model, best_model_name, holdout_results, model_results = run_final_model_training_with_holdout(
-            X_train, y_train, X_test, y_test, X_holdout, y_holdout, selected_features
+            X_train, y_train, X_test, y_test, X_holdout, y_holdout, selected_features, scaler
         )
         
         # Step 9: Comprehensive Analysis and Production Recommendations
-        print("\n" + "="*80)
-        print("COMPREHENSIVE ANALYSIS AND PRODUCTION RECOMMENDATIONS")
-        print("="*80)
-        
-        # Extract results for analysis
-        lgb_test_rmse = model_results['lgb_test_rmse']
-        lgb_holdout_rmse = model_results['lgb_holdout_rmse']
-        stack_test_rmse = model_results['stack_test_rmse'] 
-        stack_holdout_rmse = model_results['stack_holdout_rmse']
-        
-        # Model selection summary
-        print(f"\n SELECTED MODEL: {best_model_name}")
-        print(f"   Selected based on test set performance during training")
-        
-        # Holdout validation summary
-        print(f"\n HOLDOUT VALIDATION RESULTS (Real-world Performance Estimate):")
-        print(f"   LightGBM Holdout RMSE:      {lgb_holdout_rmse:.4f}")
-        print(f"   Stacking Holdout RMSE:      {stack_holdout_rmse:.4f}")
-        
-        # Generalization analysis
-        lgb_generalization_gap = abs(lgb_test_rmse - lgb_holdout_rmse)
-        stack_generalization_gap = abs(stack_test_rmse - stack_holdout_rmse)
-        
-        print(f"\n GENERALIZATION ANALYSIS:")
-        print(f"   LightGBM:")
-        print(f"     Test RMSE: {lgb_test_rmse:.4f}")
-        print(f"     Holdout RMSE: {lgb_holdout_rmse:.4f}")
-        print(f"     Gap: {lgb_generalization_gap:.4f}")
-        
-        print(f"   Stacking Ensemble:")
-        print(f"     Test RMSE: {stack_test_rmse:.4f}")
-        print(f"     Holdout RMSE: {stack_holdout_rmse:.4f}")
-        print(f"     Gap: {stack_generalization_gap:.4f}")
-        
-        # Best model analysis
-        if best_model_name == "LightGBM":
-            final_holdout_rmse = lgb_holdout_rmse
-            generalization_gap = lgb_generalization_gap
-        else:
-            final_holdout_rmse = stack_holdout_rmse
-            generalization_gap = stack_generalization_gap
-        
-        # Performance assessment
-        print(f"\n PERFORMANCE ASSESSMENT:")
-        if generalization_gap < 0.01:
-            print(f"    EXCELLENT: Very low generalization gap ({generalization_gap:.4f})")
-            reliability = "High"
-        elif generalization_gap < 0.03:
-            print(f"    GOOD: Acceptable generalization gap ({generalization_gap:.4f})")
-            reliability = "Good"
-        elif generalization_gap < 0.05:
-            print(f"     FAIR: Moderate generalization gap ({generalization_gap:.4f})")
-            reliability = "Fair"
-        else:
-            print(f"    POOR: High generalization gap ({generalization_gap:.4f})")
-            reliability = "Poor"
-        
-        # Data split assessment
-        print(f"\n DATA SPLIT ASSESSMENT:")
-        print(f"   Training samples: {len(X_train)} ({len(X_train)/len(df):.1%})")
-        print(f"   Test samples: {len(X_test)} ({len(X_test)/len(df):.1%})")
-        print(f"   Holdout samples: {len(X_holdout)} ({len(X_holdout)/len(df):.1%})")
-        
-        if len(X_holdout) < 50:
-            print(f"     Very small holdout set - consider increasing holdout ratio")
-        elif len(X_holdout) < 100:
-            print(f"     Small holdout set - results may be less reliable")
-        else:
-            print(f"    Adequate holdout set size for reliable validation")
-        
-        # Production deployment recommendations
-        print(f"\n PRODUCTION DEPLOYMENT RECOMMENDATIONS:")
-        print(f"   1.  Deploy: {best_model_name}")
-        print(f"   2.  Expected Performance: {final_holdout_rmse:.4f} RMSE")
-        print(f"   3.  Model Reliability: {reliability}")
-        print(f"   4.  Performance Monitoring:")
-        print(f"      • Set performance alert if RMSE exceeds {final_holdout_rmse + 0.02:.4f}")
-        print(f"      • Consider retraining if RMSE exceeds {final_holdout_rmse + 0.05:.4f}")
-        print(f"   5.  A/B Testing:")
-        print(f"      • Both models saved for A/B testing")
-        print(f"      • Compare live performance against holdout validation")
-        print(f"   6.  Model Validation:")
-        print(f"      • Holdout RMSE represents true unseen data performance")
-        print(f"      • Use this as baseline for production monitoring")
-        
-        # Risk assessment
-        print(f"\n  RISK ASSESSMENT:")
-        if generalization_gap > 0.03:
-            print(f"   • HIGH: Significant performance drop on unseen data")
-            print(f"   • Recommend additional validation before production")
-        elif generalization_gap > 0.01:
-            print(f"   • MEDIUM: Some performance drop expected")
-            print(f"   • Monitor closely in production")
-        else:
-            print(f"   • LOW: Performance consistent across datasets")
-            print(f"   • Ready for production deployment")
+        generate_production_report(model_results, best_model_name, df, X_train, X_test, X_holdout)
         
         # Final summary
         print("\n" + "="*80)
         print("PIPELINE COMPLETED SUCCESSFULLY!")
         print("="*80)
         print(f" Production Model: {best_model_name}")
+        lgb_test_rmse = model_results['lgb_test_rmse']
+        stack_test_rmse = model_results['stack_test_rmse']
         print(f" Test Set RMSE: {lgb_test_rmse if best_model_name == 'LightGBM' else stack_test_rmse:.4f}")
+        final_holdout_rmse = model_results['lgb_holdout_rmse'] if best_model_name == 'LightGBM' else model_results['stack_holdout_rmse']
+        generalization_gap = model_results['lgb_test_rmse'] - model_results['lgb_holdout_rmse'] if best_model_name == 'LightGBM' else model_results['stack_test_rmse'] - model_results['stack_holdout_rmse']
+
         print(f" Holdout RMSE (Real-world estimate): {final_holdout_rmse:.4f}")
         print(f" Generalization Gap: {generalization_gap:.4f}")
         print(f" All models and results saved in 'saved_models' directory")

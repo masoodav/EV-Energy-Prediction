@@ -12,6 +12,7 @@ from datetime import datetime
 from sklearn.ensemble import RandomForestRegressor, StackingRegressor
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
+from sklearn.linear_model import Ridge
 
 from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from sklearn.metrics import mean_squared_error, make_scorer
@@ -168,9 +169,13 @@ def test_different_random_states(X_train, y_train, X_test, y_test, random_states
 
 def create_advanced_model_stack(random_state=42):
     """
-    Creates a stacking ensemble of multiple advanced models with improved parameters.
+    Creates a stacking ensemble of multiple diverse models.
+    
+    Includes powerful gradient boosting models and a linear model (Ridge)
+    to provide a diverse set of base learners, which can improve the
+    overall performance and robustness of the ensemble.
     """
-    # Define base models with better parameters
+    # Define base models with a mix of tree-based and linear models
     estimators = [
         ('lgb', LGBMRegressor(
             n_estimators=1000,
@@ -201,7 +206,10 @@ def create_advanced_model_stack(random_state=42):
             l2_leaf_reg=0.1,
             verbose=False,
             random_state=random_state
-        ))
+        )),
+        ('ridge', Ridge(
+            random_state=random_state
+        )) 
     ]
     
     # Create stacking ensemble with a meta-learner
@@ -375,7 +383,7 @@ def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
 
 
 def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse, 
-                                  holdout_results, feature_names):
+                                  holdout_results, feature_names, scaler):
     """
     Save both models and holdout validation results for production deployment.
     """
@@ -392,6 +400,7 @@ def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse
         'test_rmse': lgb_rmse,
         'holdout_results': holdout_results.get('lgb', {}),
         'feature_names': feature_names,
+        'scaler': scaler,
         'model_type': 'LightGBM',
         'timestamp': timestamp
     }, lgb_filename)
@@ -403,6 +412,7 @@ def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse
         'test_rmse': stack_rmse,
         'holdout_results': holdout_results.get('stack', {}),
         'feature_names': feature_names,
+        'scaler': scaler,
         'model_type': 'Stacking_Ensemble',
         'timestamp': timestamp
     }, stack_filename)
@@ -449,7 +459,7 @@ def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse
 
 def load_model_for_prediction(model_path):
     """
-    Load a saved model for prediction
+    Load a saved model and its associated scaler for prediction
     """
     model_data = joblib.load(model_path)
     print(f"Loaded {model_data['model_type']} model")
@@ -457,10 +467,12 @@ def load_model_for_prediction(model_path):
     if 'holdout_results' in model_data and model_data['holdout_results']:
         holdout_rmse = model_data['holdout_results']['rmse']
         print(f"  Holdout RMSE: {holdout_rmse:.4f}")
+    if 'scaler' in model_data:
+        print("  Associated feature scaler also loaded.")
     return model_data
 
 
-def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_holdout, y_holdout, feature_names):
+def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_holdout, y_holdout, feature_names, scaler):
     """
     Run the complete model training pipeline with holdout validation.
     
@@ -562,7 +574,7 @@ def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_ho
     print(f"\nStep 7: Saving models and holdout results...")
     lgb_file, stack_file, results_file = save_models_and_holdout_results(
         lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse,
-        holdout_results, feature_names
+        holdout_results, feature_names, scaler
     )
     
     return best_model, best_model_name, holdout_results, {
