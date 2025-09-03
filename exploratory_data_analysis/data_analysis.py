@@ -41,6 +41,40 @@ def perform_basic_data_exploration(df):
     else:
         print("\nFailed to load the dataset.")
 
+
+
+def plot_input_vs_target_line(df, input_features, target_variable, window_size=10):
+    """
+    Generates smoothed line plots for each input feature against the target variable
+    using a rolling average.
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data.
+        input_features (list): List of input feature column names.
+        target_variable (str): The target variable column name.
+        window_size (int): Window size for rolling average smoothing.
+    """
+    print(f"\n--- Generating Smoothed Line Plots for Input Features vs. {target_variable} ---")
+
+    for feature in input_features:
+        if feature in df.columns and target_variable in df.columns:
+            # Drop NaNs and sort by feature for smooth plotting
+            sorted_df = df[[feature, target_variable]].dropna().sort_values(by=feature)
+
+            # Apply rolling average to target variable
+            smoothed_target = sorted_df[target_variable].rolling(window=window_size, min_periods=1).mean()
+
+            plt.figure(figsize=(10, 6))
+            sns.lineplot(x=sorted_df[feature], y=smoothed_target, color='steelblue')
+            plt.title(f'{feature} vs. {target_variable} (Smoothed)', fontsize=14)
+            plt.xlabel(feature, fontsize=12)
+            plt.ylabel(target_variable, fontsize=12)
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
+        else:
+            print(f"Skipping {feature}: missing in DataFrame or target variable not found.")
+
 def convert_timestamp_to_datetime(df):
     """
     Converts the 'timestamp' column of a DataFrame to datetime objects.
@@ -232,11 +266,65 @@ def create_box_plots_for_categorical_vs_target(df, categorical_features, target_
         target_variable (str): The target variable column name.
     """
     print(f"\n--- Generating Box Plots for Categorical Features vs. {target_variable} ---")
-    
     for feature in categorical_features:
         if feature in df.columns and target_variable in df.columns:
             plt.figure(figsize=(10, 6))
             sns.boxplot(x=df[feature], y=df[target_variable])
+            plt.title(f'Distribution of {target_variable} by {feature}')
+            plt.xlabel(feature)
+            plt.ylabel(target_variable)
+            plt.tight_layout()
+            plt.show()
+
+def create_bar_plots_for_categorical_vs_target(df, categorical_features, target_variable):
+    """
+    Generates bar plots (mean ± standard error) to visualize the relationship 
+    between categorical features and a target variable.
+    
+    Args:
+        df (pd.DataFrame): The DataFrame to visualize.
+        categorical_features (list): List of categorical column names.
+        target_variable (str): The target variable column name.
+    """
+    print(f"\n--- Generating Bar Plots for Categorical Features vs. {target_variable} ---")
+    for feature in categorical_features:
+        if feature in df.columns and target_variable in df.columns:
+            plt.figure(figsize=(10, 6))
+            sns.barplot(
+                x=feature, 
+                y=target_variable, 
+                data=df, 
+                ci="sd",      # "sd" = show standard deviation; use "se" for standard error
+                capsize=0.2,  # adds caps to error bars
+                palette="viridis"
+            )
+            plt.title(f'Average {target_variable} by {feature}')
+            plt.xlabel(feature)
+            plt.ylabel(f'Mean {target_variable}')
+            plt.tight_layout()
+            plt.show()
+
+def create_violin_plots_for_categorical_vs_target(df, categorical_features, target_variable):
+    """
+    Generates violin plots to visualize the relationship between categorical
+    features and a target variable.
+    
+    Args:
+        df (pd.DataFrame): The DataFrame to visualize.
+        categorical_features (list): List of categorical column names.
+        target_variable (str): The target variable column name.
+    """
+    print(f"\n--- Generating Violin Plots for Categorical Features vs. {target_variable} ---")
+    for feature in categorical_features:
+        if feature in df.columns and target_variable in df.columns:
+            plt.figure(figsize=(10, 6))
+            sns.violinplot(
+                x=feature, 
+                y=target_variable, 
+                data=df,
+                inner="box",       # show a boxplot inside the violin
+                palette="Set2"
+            )
             plt.title(f'Distribution of {target_variable} by {feature}')
             plt.xlabel(feature)
             plt.ylabel(target_variable)

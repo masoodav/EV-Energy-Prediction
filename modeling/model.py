@@ -13,6 +13,10 @@ from sklearn.ensemble import RandomForestRegressor, StackingRegressor
 from xgboost import XGBRegressor
 from catboost import CatBoostRegressor
 from sklearn.linear_model import Ridge
+from sklearn.neural_network import MLPRegressor
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.svm import SVR
+from sklearn.ensemble import VotingRegressor, BaggingRegressor
 
 from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from sklearn.metrics import mean_squared_error, make_scorer
@@ -169,85 +173,113 @@ def test_different_random_states(X_train, y_train, X_test, y_test, random_states
 
 def create_advanced_model_stack(random_state=42):
     """
-    Creates a stacking ensemble of multiple diverse models.
-    
-    Includes powerful gradient boosting models and a linear model (Ridge)
-    to provide a diverse set of base learners, which can improve the
-    overall performance and robustness of the ensemble.
+    Creates a more diverse stacking ensemble with weighted models
     """
-    # Define base models with a mix of tree-based and linear models
+    # Create base models with different strengths
     estimators = [
         ('lgb', LGBMRegressor(
-            n_estimators=1000,
-            learning_rate=0.05,
+            n_estimators=2000,
+            learning_rate=0.01,
             max_depth=6,
-            num_leaves=48,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
+            num_leaves=50,
+            subsample=0.8,
+            colsample_bytree=0.8,
             random_state=random_state,
             verbose=-1
         )),
         ('xgb', XGBRegressor(
-            n_estimators=1000,
-            learning_rate=0.05,
+            n_estimators=2000,
+            learning_rate=0.01,
             max_depth=6,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
             random_state=random_state
         )),
         ('cat', CatBoostRegressor(
-            iterations=1000,
-            learning_rate=0.05,
+            iterations=2000,
+            learning_rate=0.01,
             depth=6,
-            l2_leaf_reg=0.1,
             verbose=False,
             random_state=random_state
         )),
-        ('ridge', Ridge(
+        ('mlp', MLPRegressor(
+            hidden_layer_sizes=(100, 50),
+            max_iter=1000,
             random_state=random_state
-        )) 
+        )),
+        ('svr', SVR(kernel='rbf')),
+        ('kr', KernelRidge(alpha=0.1)),
+        ('bag', BaggingRegressor(
+            n_estimators=50,
+            random_state=random_state
+        ))
     ]
     
-    # Create stacking ensemble with a meta-learner
+    # Create both stacking and voting ensembles
     stack = StackingRegressor(
         estimators=estimators,
         final_estimator=LGBMRegressor(
-            n_estimators=100,
-            learning_rate=0.1,
-            random_state=random_state,
-            verbose=-1
+            n_estimators=200,
+            learning_rate=0.05,
+            random_state=random_state
         ),
         cv=5,
         n_jobs=-1
     )
-    return stack
+    
+    # Create weighted voting ensemble
+    voter = VotingRegressor(
+        estimators=estimators,
+        weights=[0.3, 0.2, 0.2, 0.1, 0.1, 0.05, 0.05]  # Higher weights for boosting models
+    )
+    
+    return stack, voter
 
 
 def tune_model_stack(X_train, y_train, X_test, y_test, random_state=42):
     """
-    Trains and evaluates a stacking ensemble model with feature name handling.
-    Uses only train/test data - holdout is reserved.
+    Trains and evaluates both stacking and voting ensembles
     """
-    print("\n--- Training Stacking Ensemble ---")
-    model = create_advanced_model_stack(random_state)
+    print("\n--- Training Advanced Ensemble Models ---")
     
-    # Convert to numpy arrays to avoid feature name warnings
+    # Get both ensemble models
+    stack_model, vote_model = create_advanced_model_stack(random_state)
+    
+    # Convert to numpy arrays
     X_train_array = X_train.values if hasattr(X_train, 'values') else X_train
     X_test_array = X_test.values if hasattr(X_test, 'values') else X_test
     
-    model.fit(X_train_array, y_train)
+    # Train both models
+    stack_model.fit(X_train_array, y_train)
+    vote_model.fit(X_train_array, y_train)
     
-    y_pred = model.predict(X_test_array)
-    mse = mean_squared_error(y_test, y_pred)
-    rmse = np.sqrt(mse)
+    # Get predictions from both models
+    stack_pred = stack_model.predict(X_test_array)
+    vote_pred = vote_model.predict(X_test_array)
     
-    print(f"Stacking Ensemble RMSE: {rmse:.4f}")
-    print(f"Stacking Ensemble MSE: {mse:.4f}")
-    return model, rmse
+    # Calculate MSE for both
+    stack_mse = mean_squared_error(y_test, stack_pred)
+    vote_mse = mean_squared_error(y_test, vote_pred)
+    
+    # Create a combined prediction using weighted average
+    final_pred = 0.6 * stack_pred + 0.4 * vote_pred
+    final_mse = mean_squared_error(y_test, final_pred)
+    
+    print(f"Stacking Ensemble MSE: {stack_mse:.4f}")
+    print(f"Voting Ensemble MSE: {vote_mse:.4f}")
+    print(f"Combined Ensemble MSE: {final_mse:.4f}")
+    
+    # Modified return statements
+    if final_mse < min(stack_mse, vote_mse):
+        print("Using combined stack+vote ensemble")
+        ensemble = EnsembleWrapper(stack_model, vote_model)
+        return ensemble, final_mse
+    elif stack_mse < vote_mse:
+        print("Using stacking ensemble only")
+        return stack_model, stack_mse
+    else:
+        print("Using voting ensemble only")
+        return vote_model, vote_mse
 
 
 def rmse_scorer(y_true, y_pred):
@@ -325,6 +357,19 @@ def tune_lightgbm_model(X_train, y_train, X_test, y_test, random_state=42):
     return final_model, best_params, final_rmse
 
 
+def make_ensemble_prediction(models, X):
+    """Helper function to make predictions using ensemble models"""
+    if isinstance(models, tuple):
+        # If we have both stack and vote models
+        stack_model, vote_model = models
+        stack_pred = stack_model.predict(X)
+        vote_pred = vote_model.predict(X)
+        # Return weighted average
+        return 0.6 * stack_pred + 0.4 * vote_pred
+    else:
+        # Single model
+        return models.predict(X)
+
 def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
     """
     Make predictions on the completely unseen holdout dataset.
@@ -346,8 +391,8 @@ def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
     else:
         X_holdout_array = X_holdout
     
-    # Make predictions
-    y_holdout_pred = model.predict(X_holdout_array)
+    # Make predictions using the helper function
+    y_holdout_pred = make_ensemble_prediction(model, X_holdout_array)
     
     # Calculate metrics
     holdout_mse = mean_squared_error(y_holdout, y_holdout_pred)
@@ -405,17 +450,19 @@ def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse
         'timestamp': timestamp
     }, lgb_filename)
     
-    # Save Stacking model
+    # Save Stacking model with special handling for tuples
     stack_filename = f'saved_models/stacking_model_{timestamp}.joblib'
-    joblib.dump({
+    stack_data = {
         'model': stack_model,
         'test_rmse': stack_rmse,
         'holdout_results': holdout_results.get('stack', {}),
         'feature_names': feature_names,
         'scaler': scaler,
         'model_type': 'Stacking_Ensemble',
-        'timestamp': timestamp
-    }, stack_filename)
+        'timestamp': timestamp,
+        'is_ensemble_wrapper': isinstance(stack_model, EnsembleWrapper)
+    }
+    joblib.dump(stack_data, stack_filename)
     
     # Save comprehensive comparison and holdout results
     results_filename = f'saved_models/model_comparison_and_holdout_{timestamp}.txt'
@@ -457,18 +504,29 @@ def save_models_and_holdout_results(lgb_model, stack_model, lgb_params, lgb_rmse
     return lgb_filename, stack_filename, results_filename
 
 
+def make_prediction(model_data, X):
+    """Helper function to make predictions using loaded models"""
+    model = model_data['model']
+    if model_data.get('is_ensemble_wrapper', False):
+        # Handle ensemble wrapper models
+        ensemble = model
+        return ensemble.predict(X)
+    else:
+        # Single model
+        return model.predict(X)
+
 def load_model_for_prediction(model_path):
-    """
-    Load a saved model and its associated scaler for prediction
-    """
+    """Load a saved model and its associated scaler for prediction"""
     model_data = joblib.load(model_path)
     print(f"Loaded {model_data['model_type']} model")
     print(f"  Test RMSE: {model_data['test_rmse']:.4f}")
+    
     if 'holdout_results' in model_data and model_data['holdout_results']:
         holdout_rmse = model_data['holdout_results']['rmse']
         print(f"  Holdout RMSE: {holdout_rmse:.4f}")
     if 'scaler' in model_data:
         print("  Associated feature scaler also loaded.")
+    
     return model_data
 
 
@@ -495,7 +553,7 @@ def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_ho
     
     # Step 3: Train stacking ensemble using only train/test data
     print(f"\nStep 3: Training Stacking Ensemble...")
-    stack_model, stack_rmse = tune_model_stack(
+    stack_model, stack_rmse = tune_model_stack(  # Now correctly unpacks 2 values
         X_train, y_train, X_test, y_test,
         random_state=best_random_state
     )
