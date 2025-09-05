@@ -11,8 +11,6 @@ import argparse
 from data_collection.data_loader import load_kaggle_dataset
 from data_preprocessing.data_preprocessor import (
     find_missing_data,
-    find_and_replace_non_standard_missing_values,
-    impute_missing_data,
     suggest_imputation_strategy,
     auto_impute_missing_data,
     handle_outliers_iqr_method,
@@ -27,7 +25,6 @@ from cross_validation.train_test_split import prepare_tscv_splits
 # Updated imports from the improved model.py file
 from modeling.model import (
     run_model_comparison_pipeline, 
-    tune_lightgbm_model,
     test_different_random_states,
     tune_model_stack,
     run_final_model_training_with_holdout,  # Updated function name
@@ -41,106 +38,40 @@ from modeling.model import (
 from exploratory_data_analysis.data_analysis import (
     perform_basic_data_exploration,
     convert_timestamp_to_datetime,
+    create_bar_plots_for_categorical_vs_target,
+    create_correlation_heatmap,
     create_3d_scatter_plot,
-    create_box_plots_for_categorical_vs_target
+    create_box_plots_for_categorical_vs_target,
+    plot_input_vs_target_line,
+    create_violin_plots_for_categorical_vs_target
 )
 
 def generate_production_report(model_results, best_model_name, df, X_train, X_test, X_holdout):
-    """
-    Generates a comprehensive analysis and production recommendation report.
-    """
-    print("\n" + "="*80)
-    print("COMPREHENSIVE ANALYSIS AND PRODUCTION RECOMMENDATIONS")
-    print("="*80)
+    """Generates a comprehensive analysis with ordered model performance"""
+    print("\nmodel performance summary:")
     
-    # Extract results for analysis
-    lgb_test_rmse = model_results['lgb_test_rmse']
-    lgb_holdout_rmse = model_results['lgb_holdout_rmse']
-    stack_test_rmse = model_results['stack_test_rmse'] 
-    stack_holdout_rmse = model_results['stack_holdout_rmse']
+    # Get unique model performances and sort them
+    model_performances = {}
+    for model_name, results in model_results.items():
+        if isinstance(results, dict) and 'test_rmse' in results:
+            if model_name not in model_performances:  # Avoid duplicates
+                model_performances[model_name] = {
+                    'test_rmse': results['test_rmse'],
+                    'holdout_rmse': results.get('holdout_rmse', None)
+                }
     
-    # Model selection summary
-    print(f"\n SELECTED MODEL: {best_model_name}")
-    print(f"   Selected based on test set performance during training")
+    # Sort by test RMSE
+    sorted_models = sorted(model_performances.items(), key=lambda x: x[1]['test_rmse'])
     
-    # Holdout validation summary
-    print(f"\n HOLDOUT VALIDATION RESULTS (Real-world Performance Estimate):")
-    print(f"   LightGBM Holdout RMSE:      {lgb_holdout_rmse:.4f}")
-    print(f"   Stacking Holdout RMSE:      {stack_holdout_rmse:.4f}")
-    
-    # Generalization analysis
-    lgb_generalization_gap = lgb_test_rmse - lgb_holdout_rmse
-    stack_generalization_gap = stack_test_rmse - stack_holdout_rmse
-    
-    print(f"\n GENERALIZATION ANALYSIS:")
-    print(f"   LightGBM:")
-    print(f"     Test RMSE: {lgb_test_rmse:.4f}")
-    print(f"     Holdout RMSE: {lgb_holdout_rmse:.4f}")
-    print(f"     Gap: {abs(lgb_generalization_gap):.4f}")
-    
-    print(f"   Stacking Ensemble:")
-    print(f"     Test RMSE: {stack_test_rmse:.4f}")
-    print(f"     Holdout RMSE: {stack_holdout_rmse:.4f}")
-    print(f"     Gap: {abs(stack_generalization_gap):.4f}")
-    
-    # Best model analysis
-    if best_model_name == "LightGBM":
-        final_holdout_rmse = lgb_holdout_rmse
-        generalization_gap = lgb_generalization_gap
-    else:
-        final_holdout_rmse = stack_holdout_rmse
-        generalization_gap = stack_generalization_gap
-    
-    # Performance assessment
-    print(f"\n PERFORMANCE ASSESSMENT:")
-    if generalization_gap < 0:
-        print(f"    EXCELLENT: Model performed even better on the holdout set (Gap: {generalization_gap:.4f}). This is a strong sign of a robust model.")
-        reliability = "High"
-    elif abs(generalization_gap) < 0.02:
-        print(f"    GOOD: Very low generalization gap ({abs(generalization_gap):.4f}). The model generalizes well.")
-        reliability = "Good"
-    elif abs(generalization_gap) < 0.05:
-        print(f"     FAIR: Moderate generalization gap ({abs(generalization_gap):.4f}).")
-        reliability = "Fair"
-    else:
-        print(f"    POOR: High generalization gap ({abs(generalization_gap):.4f}).")
-        reliability = "Poor"
-    
-    # Data split assessment
-    print(f"\n DATA SPLIT ASSESSMENT:")
-    print(f"   Training samples: {len(X_train)} ({len(X_train)/len(df):.1%})")
-    print(f"   Test samples: {len(X_test)} ({len(X_test)/len(df):.1%})")
-    print(f"   Holdout samples: {len(X_holdout)} ({len(X_holdout)/len(df):.1%})")
-    
-    if len(X_holdout) < 50:
-        print(f"     Warning: Very small holdout set - consider increasing holdout ratio for more reliable validation.")
-    elif len(X_holdout) < 100:
-        print(f"     Warning: Small holdout set - results may be less reliable.")
-    else:
-        print(f"    Adequate holdout set size for reliable validation.")
-    
-    # Production deployment recommendations
-    print(f"\n PRODUCTION DEPLOYMENT RECOMMENDATIONS:")
-    print(f"   1.  Deploy: {best_model_name}")
-    print(f"   2.  Expected Performance: ~{final_holdout_rmse:.4f} RMSE")
-    print(f"   3.  Model Reliability: {reliability}")
-    print(f"   4.  Performance Monitoring:")
-    print(f"      • Set performance alert if production RMSE exceeds {final_holdout_rmse + 0.02:.4f}")
-    print(f"      • Consider retraining if production RMSE exceeds {final_holdout_rmse + 0.05:.4f}")
-    print(f"   5.  A/B Testing:")
-    print(f"      • Both models are saved and can be used for A/B testing to compare live performance.")
-    print(f"   6.  Model Validation:")
-    print(f"      • The Holdout RMSE represents the most realistic estimate of performance on new, unseen data.")
-    
-    # Risk assessment
-    print(f"\n  RISK ASSESSMENT:")
-    if reliability == "Poor":
-        print(f"   • HIGH: Significant performance drop was observed on unseen data. Recommend additional validation before full production deployment.")
-    elif reliability == "Fair":
-        print(f"   • MEDIUM: Some performance drop expected. Monitor closely in production.")
-    else:
-        print(f"   • LOW: Performance is consistent and reliable. Ready for production deployment.")
+    print("\nmodel ranking:")
+    for rank, (name, perf) in enumerate(sorted_models, 1):
+        print(f"\n{rank}. {name}")
+        print(f"   test rmse: {perf['test_rmse']:.4f}")
+        if perf['holdout_rmse']:
+            print(f"   holdout rmse: {perf['holdout_rmse']:.4f}")
+            print(f"   generalization gap: {abs(perf['test_rmse'] - perf['holdout_rmse']):.4f}")
 
+    
 ##############################################################
 if __name__ == "__main__":
 ##############################################################
@@ -158,8 +89,6 @@ if __name__ == "__main__":
             "   python main.py --include-visualization   # Include data visualization step\n"
             "   python main.py --train-ratio 0.8 --test-ratio 0.15  # Custom: 80% train, 15% test, 5% holdout\n"
             "   python main.py --help                # Show this help message\n\n"
-            "The holdout dataset is NEVER used during training, hyperparameter tuning,\n"
-            "or model selection. It's only used at the very end for final validation.\n"
         ),
         formatter_class=argparse.RawTextHelpFormatter
     )
@@ -180,16 +109,16 @@ if __name__ == "__main__":
     if holdout_ratio < 0.05:
         print("Warning: Holdout set is very small (<5%). Consider adjusting ratios for more reliable validation.")
     
-    print(f"Data split configuration:")
-    print(f"  Training: {args.train_ratio:.1%} - for model training")
-    print(f"  Testing: {args.test_ratio:.1%} - for model selection and hyperparameter tuning")  
-    print(f"  Holdout: {holdout_ratio:.1%} - RESERVED for final validation (never seen during training)")
+    print(f"data split configuration:")
+    print(f"  training: {args.train_ratio:.1%}")
+    print(f"  testing: {args.test_ratio:.1%}")
+    print(f"  holdout: {holdout_ratio:.1%}")
 
     # Load the DataFrame using the function
     df = load_kaggle_dataset(dataset_id, file, "dataset")
 
     if df is not None:
-
+        print("\nrunning pipeline...")
         # Step 1: Perform initial data exploration
         print("\n--- Running Data Exploration ---")
         perform_basic_data_exploration(df)
@@ -202,27 +131,21 @@ if __name__ == "__main__":
         numeric_features = ['speed_kmh', 'acceleration_mps2', 'regen_braking_usage', 'brake_intensity', 'traffic_density']
         categorical_features = ['weather_condition', 'road_type']
 
-        # Step 2: Create visualizations (optional)
-        if args.include_visualization:
-            print("\n--- Running Data Visualization ---")
-            print(f"\n--- Generating all pairwise 3D plots for numeric features vs. {target_variable} ---")
-            for x_axis, y_axis in combinations(numeric_features, 2):
-                create_3d_scatter_plot(df, x_axis, y_axis, target_variable)
-            create_box_plots_for_categorical_vs_target(df, categorical_features, target_variable)
-
-        # Step 3: Missing Values
+        # Step 2: Missing Values
         print("\n--- Running Missing Value Analysis ---")
         find_missing_data(df)
         suggest_imputation_strategy(df)
         print("\n--- Automatically Imputing Missing Values ---")
         df = auto_impute_missing_data(df)
 
-        # Step 4: Outlier Handling for Numeric Features
+        # Step 3: Outlier Handling for Numeric Features
         print("\n--- Handling Outliers in Numeric Features ---")
         for col in numeric_features:
             df = handle_outliers_iqr_method(df, col)
 
-        # Step 5: Feature Engineering
+        df_original = df.copy()
+
+        # Step 4: Feature Engineering
         print("\n--- Feature Engineering ---")
         df = create_combined_ev_features(df)
         df = encode_categorical_features(df, ['weather_condition', 'road_type'])
@@ -233,6 +156,9 @@ if __name__ == "__main__":
             'total_braking_force',
             'traffic_density'
         ] + [col for col in df.columns if col.startswith('weather_condition_') or col.startswith('road_type_')]
+
+        #New features
+        numeric_features = ['instantaneous_power_proxy', 'total_braking_force', 'traffic_density']
         
         # Scale features and transform target
         df_processed, scaler = scale_features_and_transform_target(
@@ -244,100 +170,47 @@ if __name__ == "__main__":
         # Update df for modeling
         df = df_processed
 
+        #Step 5: Create visualizations (optional)
+        if args.include_visualization:
+            print("\n--- Running Data Visualization ---")
+            create_correlation_heatmap(df)
+            for x_axis, y_axis in combinations(numeric_features, 2):
+                create_3d_scatter_plot(df, x_axis, y_axis, target_variable)
+            create_box_plots_for_categorical_vs_target(df_original, categorical_features, target_variable)
+
+
         # Step 6: Prepare Train/Test/Holdout Splits
-        print("\n" + "="*80)
-        print("PREPARING TRAIN/TEST/HOLDOUT SPLITS")
-        print("="*80)
-        print(" IMPORTANT: The holdout dataset will be completely reserved!")
-        
-        # Create train/test/holdout splits maintaining chronological order
+        print("\ndata split preparation")
         X_train, X_test, X_holdout, y_train, y_test, y_holdout = prepare_train_test_holdout_splits(
             df, selected_features, target_variable, 
             train_ratio=args.train_ratio, 
             test_ratio=args.test_ratio
         )
         
-        print(f"\nDataset information:")
-        print(f"  Features: {selected_features}")
-        print(f"  Target variable: {target_variable}")
-        print(f"  Total samples: {len(df)}")
+        print(f"\ndataset summary:")
+        print(f"  features: {len(selected_features)}")
+        print(f"  samples: {len(df)}")
         
         # Step 7: Initial Model Comparison (using only train+test data)
-        print("\n" + "="*80)
-        print("INITIAL MODEL COMPARISON")
-        print("="*80)
-        print(" Running cross-validation using train+test portion of data...")
-        
-        # Create a subset of data that excludes holdout for CV
+        print("\nrunning initial model comparison")
         train_test_df = df.iloc[:len(X_train) + len(X_test)]
-        run_model_comparison_pipeline(train_test_df, selected_features, target_variable)
+        best_initial_model, model_performances = run_model_comparison_pipeline(
+            train_test_df, selected_features, target_variable
+        )
         
-        # Step 8: Final Model Training and Selection (using only train+test data)
-        print("\n" + "="*80)
-        print("FINAL MODEL TRAINING AND SELECTION")
-        print("="*80)
-        print(" Training and selecting best model using train+test data...")
+        print(f"\nbest model from initial comparison: {best_initial_model}")
         
-        # Run the comprehensive model training pipeline with holdout validation
+        print("\ntraining final models...")
         best_model, best_model_name, holdout_results, model_results = run_final_model_training_with_holdout(
             X_train, y_train, X_test, y_test, X_holdout, y_holdout, selected_features, scaler
         )
         
-        # Step 9: Comprehensive Analysis and Production Recommendations
         generate_production_report(model_results, best_model_name, df, X_train, X_test, X_holdout)
         
-        # Final summary
-        print("\n" + "="*80)
-        print("PIPELINE COMPLETED SUCCESSFULLY!")
-        print("="*80)
-        print(f" Production Model: {best_model_name}")
-        lgb_test_rmse = model_results['lgb_test_rmse']
-        stack_test_rmse = model_results['stack_test_rmse']
-        print(f" Test Set RMSE: {lgb_test_rmse if best_model_name == 'LightGBM' else stack_test_rmse:.4f}")
-        final_holdout_rmse = model_results['lgb_holdout_rmse'] if best_model_name == 'LightGBM' else model_results['stack_holdout_rmse']
-        generalization_gap = model_results['lgb_test_rmse'] - model_results['lgb_holdout_rmse'] if best_model_name == 'LightGBM' else model_results['stack_test_rmse'] - model_results['stack_holdout_rmse']
+        print("\npipeline completed")
+        print(f"selected model: {best_model_name}")
+        print("models saved in saved_models directory")
 
-        print(f" Holdout RMSE (Real-world estimate): {final_holdout_rmse:.4f}")
-        print(f" Generalization Gap: {generalization_gap:.4f}")
-        print(f" All models and results saved in 'saved_models' directory")
-        print(f" Holdout validation completed - model ready for production!")
-        
-        # Test model loading
-        print(f"\n--- Testing Model Loading for Production Deployment ---")
-        try:
-            model_files = model_results['model_files']
-            # Load the selected best model
-            if best_model_name == "LightGBM":
-                loaded_model_data = load_model_for_prediction(model_files['lgb_file'])
-            else:
-                loaded_model_data = load_model_for_prediction(model_files['stack_file'])
-            
-            # Make a test prediction on a sample
-            if len(X_holdout) > 0:
-                sample_X = X_holdout.iloc[:1]  # Get first holdout sample
-                sample_y_actual = y_holdout.iloc[0]
-                
-                # Convert to numpy if needed for ensemble models
-                if hasattr(sample_X, 'values'):
-                    sample_X_array = sample_X.values
-                else:
-                    sample_X_array = sample_X
-                    
-                sample_prediction = loaded_model_data['model'].predict(sample_X_array)[0]
-                prediction_error = abs(sample_prediction - sample_y_actual)
-                
-                print(f" Model loading test successful!")
-                print(f"   Sample prediction: {sample_prediction:.4f}")
-                print(f"   Actual value: {sample_y_actual:.4f}")
-                print(f"   Prediction error: {prediction_error:.4f}")
-                print(" Model ready for production deployment!")
-            else:
-                print(" Model loading test successful - ready for production!")
-                
-        except Exception as e:
-            print(f" Model loading test failed: {e}")
-            print("Please check saved model files before production deployment.")
-            
     else:
-        print("Failed to load dataset. Please check the dataset_id and file name.")
+        print("failed to load dataset")
         exit(1)

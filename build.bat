@@ -11,4 +11,5 @@ if not exist "%BUILD_DIR%" (
 
 :: Redirect .pyc files to build directory and run main.py
 set PYTHONPYCACHEPREFIX=%BUILD_DIR%
-python "%~dp0main.py" "--include-visualization"
+::python "%~dp0main.py" "--include-visualization"
+python "%~dp0main.py"

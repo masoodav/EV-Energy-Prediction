@@ -20,9 +20,29 @@ from sklearn.ensemble import VotingRegressor, BaggingRegressor
 
 from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from sklearn.metrics import mean_squared_error, make_scorer
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Import the time-series cross-validation utility
 from cross_validation.train_test_split import prepare_tscv_splits
+
+
+class EnsembleWrapper:
+    """Wrapper class to handle ensemble model predictions"""
+    def __init__(self, stack_model, vote_model, weights=(0.6, 0.4)):
+        self.stack_model = stack_model
+        self.vote_model = vote_model
+        self.weights = weights
+    
+    def predict(self, X):
+        """Make predictions using weighted average of stack and vote models"""
+        if hasattr(X, 'values'):
+            X_array = X.values
+        else:
+            X_array = X
+        stack_pred = self.stack_model.predict(X_array)
+        vote_pred = self.vote_model.predict(X_array)
+        return self.weights[0] * stack_pred + self.weights[1] * vote_pred
 
 
 def evaluate_multiple_models(X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, y_test: pd.Series, models_to_test: dict):
@@ -102,26 +122,32 @@ def prepare_train_test_holdout_splits(df: pd.DataFrame, features: list, target_v
 
 
 def run_model_comparison_pipeline(df: pd.DataFrame, features: list, target_variable: str, n_splits: int = 5):
-    """
-    Orchestrates the entire model comparison pipeline using time-series cross-validation.
-    This uses only the train+test portion of the data (holdout is completely reserved).
+    print("\nrunning model comparison")
 
-    Args:
-        df (pd.DataFrame): The preprocessed DataFrame containing features and target (WITHOUT holdout data).
-        features (list): A list of feature column names.
-        target_variable (str): The name of the target column.
-        n_splits (int): The number of time-series cross-validation splits to use.
-    """
-    print("\n--- Time-Series Cross-Validation and Model Training (Holdout Data Excluded) ---")
-
-    # Define a dictionary of models to test
+    # Define a dictionary of models to test with expanded options
     models_to_test = {
         'Random Forest': RandomForestRegressor(random_state=42),
         'LightGBM': LGBMRegressor(random_state=42, verbose=-1),
-        'XGBoost': XGBRegressor(random_state=42)
+        'XGBoost': XGBRegressor(random_state=42),
+        'SVR': SVR(kernel='rbf', C=1.0, epsilon=0.1),
+        'Neural Network': MLPRegressor(
+            hidden_layer_sizes=(100, 50),
+            activation='relu',
+            solver='adam',
+            max_iter=1000,
+            early_stopping=True,
+            random_state=42
+        )
     }
 
-    # Create a dictionary to store the results for each model
+    print("models:")
+    print("random forest: tree based")
+    print("lightgbm: gradient boosting")
+    print("xgboost: gradient boosting") 
+    print("svr: support vector regression")
+    print("neural network: mlp")
+
+    print("evaluating models...")
     all_results = {name: [] for name in models_to_test}
 
     # Run the time-series cross-validation loop
@@ -135,13 +161,28 @@ def run_model_comparison_pipeline(df: pd.DataFrame, features: list, target_varia
         for name, mse in fold_results.items():
             all_results[name].append(mse)
 
-    # Print combined results for comparison
-    print("\n--- Combined Cross-Validation Results ---")
+    # Calculate and sort average performance for each model
+    model_performances = {}
+    print("\nmodel ranking by performance:")
     for name, results in all_results.items():
-        print(f"\n{name} Results:")
-        print(f"  Test MSEs for each fold: {results}")
-        print(f"  Average Test MSE: {np.mean(results):.4f}")
-        print(f"  Average Test RMSE: {np.sqrt(np.mean(results)):.4f}")
+        avg_rmse = np.sqrt(np.mean(results))
+        model_performances[name] = {
+            'avg_rmse': avg_rmse,
+            'mses': results,
+            'std_rmse': np.std([np.sqrt(mse) for mse in results])
+        }
+    
+    # Sort models by average RMSE
+    sorted_models = sorted(model_performances.items(), key=lambda x: x[1]['avg_rmse'])
+    
+    # Print detailed performance comparison
+    for rank, (name, perf) in enumerate(sorted_models, 1):
+        print(f"\n{rank}. {name}")
+        print(f"   average rmse: {perf['avg_rmse']:.4f}")
+        print(f"   std rmse: {perf['std_rmse']:.4f}")
+        print(f"   mse by fold: {[f'{mse:.4f}' for mse in perf['mses']]}")
+    
+    return sorted_models[0][0], model_performances  # Return best model name and all performances
 
 
 def test_different_random_states(X_train, y_train, X_test, y_test, random_states=[42, 123, 555, 777, 999]):
@@ -172,75 +213,103 @@ def test_different_random_states(X_train, y_train, X_test, y_test, random_states
 
 
 def create_advanced_model_stack(random_state=42):
-    """
-    Creates a more diverse stacking ensemble with weighted models
-    """
-    # Create base models with different strengths
+    """Creates an enhanced stacking ensemble with optimized base models"""
+    # Enhanced base models with better configurations
     estimators = [
         ('lgb', LGBMRegressor(
-            n_estimators=2000,
+            n_estimators=3000,
             learning_rate=0.01,
-            max_depth=6,
-            num_leaves=50,
-            subsample=0.8,
-            colsample_bytree=0.8,
+            max_depth=8,
+            num_leaves=100,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            reg_alpha=0.1,
+            reg_lambda=0.1,
             random_state=random_state,
-            verbose=-1
+            verbose=-1,
+            importance_type='gain'
         )),
         ('xgb', XGBRegressor(
-            n_estimators=2000,
+            n_estimators=3000,
             learning_rate=0.01,
-            max_depth=6,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=random_state
+            max_depth=8,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            reg_alpha=0.1,
+            reg_lambda=0.1,
+            random_state=random_state,
+            tree_method='hist',
+            grow_policy='lossguide'
         )),
         ('cat', CatBoostRegressor(
-            iterations=2000,
+            iterations=3000,
             learning_rate=0.01,
-            depth=6,
+            depth=8,
+            l2_leaf_reg=3,
+            random_strength=0.1,
             verbose=False,
             random_state=random_state
         )),
         ('mlp', MLPRegressor(
-            hidden_layer_sizes=(100, 50),
+            hidden_layer_sizes=(200, 100, 50),
+            activation='relu',
+            solver='adam',
+            alpha=0.0001,
+            batch_size='auto',
+            learning_rate='adaptive',
             max_iter=1000,
+            early_stopping=True,
             random_state=random_state
         )),
-        ('svr', SVR(kernel='rbf')),
-        ('kr', KernelRidge(alpha=0.1)),
+        ('svr', SVR(
+            kernel='rbf',
+            C=1.0,
+            epsilon=0.1,
+            gamma='scale'
+        )),
+        ('kr', KernelRidge(
+            alpha=0.1,
+            kernel='rbf',
+            gamma=0.1
+        )),
         ('bag', BaggingRegressor(
-            n_estimators=50,
+            estimator=LGBMRegressor(
+                n_estimators=1000,
+                learning_rate=0.01
+            ),
+            n_estimators=10,
+            max_samples=0.85,
+            max_features=0.85,
             random_state=random_state
         ))
     ]
     
-    # Create both stacking and voting ensembles
+    # Create enhanced stacking regressor
     stack = StackingRegressor(
         estimators=estimators,
         final_estimator=LGBMRegressor(
-            n_estimators=200,
-            learning_rate=0.05,
+            n_estimators=1000,
+            learning_rate=0.01,
+            max_depth=6,
+            num_leaves=50,
             random_state=random_state
         ),
         cv=5,
-        n_jobs=-1
+        n_jobs=-1,
+        passthrough=True  # Include original features
     )
     
-    # Create weighted voting ensemble
+    # Create weighted voting ensemble with optimized weights
     voter = VotingRegressor(
         estimators=estimators,
-        weights=[0.3, 0.2, 0.2, 0.1, 0.1, 0.05, 0.05]  # Higher weights for boosting models
+        weights=[0.25, 0.25, 0.2, 0.1, 0.1, 0.05, 0.05]  # Adjusted weights
     )
     
     return stack, voter
 
 
 def tune_model_stack(X_train, y_train, X_test, y_test, random_state=42):
-    """
-    Trains and evaluates both stacking and voting ensembles
-    """
-    print("\n--- Training Advanced Ensemble Models ---")
+    print("\ntraining ensemble models")
     
     # Get both ensemble models
     stack_model, vote_model = create_advanced_model_stack(random_state)
@@ -261,24 +330,46 @@ def tune_model_stack(X_train, y_train, X_test, y_test, random_state=42):
     stack_mse = mean_squared_error(y_test, stack_pred)
     vote_mse = mean_squared_error(y_test, vote_pred)
     
-    # Create a combined prediction using weighted average
-    final_pred = 0.6 * stack_pred + 0.4 * vote_pred
+    # Calculate optimal weights using validation performance
+    weights = np.array([0.6, 0.4])  # Initial weights
+    
+    # Simple gradient descent to optimize weights
+    learning_rate = 0.01
+    n_iterations = 100
+    
+    for _ in range(n_iterations):
+        # Calculate weighted prediction
+        weighted_pred = (weights[0] * stack_pred + weights[1] * vote_pred)
+        current_mse = mean_squared_error(y_test, weighted_pred)
+        
+        # Calculate gradients
+        grad_stack = -2 * np.mean((y_test - weighted_pred) * stack_pred)
+        grad_vote = -2 * np.mean((y_test - weighted_pred) * vote_pred)
+        gradients = np.array([grad_stack, grad_vote])
+        
+        # Update weights
+        weights -= learning_rate * gradients
+        weights = np.clip(weights, 0, 1)  # Ensure weights are between 0 and 1
+        weights /= np.sum(weights)  # Normalize weights to sum to 1
+    
+    # Use optimized weights for final prediction
+    final_pred = weights[0] * stack_pred + weights[1] * vote_pred
     final_mse = mean_squared_error(y_test, final_pred)
     
-    print(f"Stacking Ensemble MSE: {stack_mse:.4f}")
-    print(f"Voting Ensemble MSE: {vote_mse:.4f}")
-    print(f"Combined Ensemble MSE: {final_mse:.4f}")
+    print(f"optimized weights: {weights}")
+    print(f"stack mse: {stack_mse:.4f}")
+    print(f"vote mse: {vote_mse:.4f}")
+    print(f"combined mse: {final_mse:.4f}")
     
-    # Modified return statements
     if final_mse < min(stack_mse, vote_mse):
-        print("Using combined stack+vote ensemble")
+        print("selected: combined ensemble")
         ensemble = EnsembleWrapper(stack_model, vote_model)
         return ensemble, final_mse
     elif stack_mse < vote_mse:
-        print("Using stacking ensemble only")
+        print("selected: stack only")
         return stack_model, stack_mse
     else:
-        print("Using voting ensemble only")
+        print("selected: vote only")
         return vote_model, vote_mse
 
 
@@ -370,20 +461,56 @@ def make_ensemble_prediction(models, X):
         # Single model
         return models.predict(X)
 
+def plot_holdout_predictions(holdout_results, model_name):
+    """
+    Creates a line plot comparing actual vs predicted values on holdout set.
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Get actual and predicted values
+    y_true = holdout_results['actual']
+    y_pred = holdout_results['predictions']
+    
+    # Create line plot
+    plt.plot(range(len(y_true)), y_true, label='Actual', color='blue', linewidth=2)
+    plt.plot(range(len(y_pred)), y_pred, label='Predicted', color='red', linestyle='--', linewidth=2)
+    
+    # Add error bands (standard deviation of residuals)
+    std_residuals = np.std(holdout_results['residuals'])
+    plt.fill_between(
+        range(len(y_true)),
+        y_pred - std_residuals,
+        y_pred + std_residuals,
+        color='red',
+        alpha=0.1,
+        label='±1 STD'
+    )
+    
+    plt.title(f'Actual vs Predicted Values ({model_name})\nHoldout Set Performance')
+    plt.xlabel('Sample Index')
+    plt.ylabel('Energy Consumption')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Add performance metrics as text
+    metrics_text = (
+        f"RMSE: {holdout_results['rmse']:.4f}\n"
+        f"MAE: {holdout_results['mae']:.4f}\n"
+        f"MAPE: {holdout_results['mape']:.2f}%"
+    )
+    plt.text(
+        0.02, 0.98, metrics_text,
+        transform=plt.gca().transAxes,
+        verticalalignment='top',
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8)
+    )
+    
+    plt.tight_layout()
+    return plt.gcf()
+
 def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
-    """
-    Make predictions on the completely unseen holdout dataset.
-    
-    Args:
-        model: Trained model
-        X_holdout: Holdout features
-        y_holdout: Holdout target values
-        model_name: Name of the model for reporting
-    
-    Returns:
-        dict: Dictionary containing predictions and metrics
-    """
-    print(f"\n--- Making Predictions on Holdout Dataset with {model_name} ---")
+    """Make predictions on the completely unseen holdout dataset."""
+    print(f"\ntesting {model_name} on holdout data")
     
     # Handle numpy conversion for ensemble models
     if hasattr(X_holdout, 'values'):
@@ -397,23 +524,34 @@ def make_holdout_predictions(model, X_holdout, y_holdout, model_name="Model"):
     # Calculate metrics
     holdout_mse = mean_squared_error(y_holdout, y_holdout_pred)
     holdout_rmse = np.sqrt(holdout_mse)
-    
-    # Calculate additional metrics
     mae = np.mean(np.abs(y_holdout - y_holdout_pred))
     mape = np.mean(np.abs((y_holdout - y_holdout_pred) / y_holdout)) * 100
+    residuals = y_holdout - y_holdout_pred  # Calculate residuals first
     
-    print(f" HOLDOUT DATASET PERFORMANCE ({model_name}):")
-    print(f"   RMSE: {holdout_rmse:.4f}")
-    print(f"   MSE: {holdout_mse:.4f}")
-    print(f"   MAE: {mae:.4f}")
-    print(f"   MAPE: {mape:.2f}%")
+    # Create visualization with all metrics available
+    fig = plot_holdout_predictions(
+        {
+            'predictions': y_holdout_pred,
+            'actual': y_holdout,
+            'rmse': holdout_rmse,
+            'mae': mae,
+            'mape': mape,
+            'residuals': residuals
+        },
+        model_name
+    )
     
-    # Residual analysis
-    residuals = y_holdout - y_holdout_pred
-    print(f"   Mean Residual: {np.mean(residuals):.4f}")
-    print(f"   Std Residual: {np.std(residuals):.4f}")
-    print(f"   Min Residual: {np.min(residuals):.4f}")
-    print(f"   Max Residual: {np.max(residuals):.4f}")
+    # Save the plot
+    os.makedirs('visualization_results', exist_ok=True)
+    fig.savefig(f'visualization_results/holdout_predictions_{model_name.lower().replace(" ", "_")}.png')
+    plt.close(fig)
+    
+    # Print metrics
+    print(f"holdout performance:")
+    print(f"  rmse: {holdout_rmse:.4f}")
+    print(f"  mse: {holdout_mse:.4f}")
+    print(f"  mae: {mae:.4f}")
+    print(f"  mape: {mape:.2f}%")
     
     return {
         'predictions': y_holdout_pred,
@@ -531,120 +669,155 @@ def load_model_for_prediction(model_path):
 
 
 def run_final_model_training_with_holdout(X_train, y_train, X_test, y_test, X_holdout, y_holdout, feature_names, scaler):
-    """
-    Run the complete model training pipeline with holdout validation.
+    print("\nrunning final model training")
     
-    The holdout dataset is ONLY used at the very end for final validation predictions.
-    """
-    print("\n" + "="*80)
-    print("FINAL MODEL TRAINING PIPELINE WITH HOLDOUT VALIDATION")
-    print("="*80)
+    # Initialize all models
+    models_to_evaluate = {
+        'Random Forest': RandomForestRegressor(random_state=42),
+        'LightGBM': LGBMRegressor(random_state=42, verbose=-1),
+        'XGBoost': XGBRegressor(random_state=42),
+        'SVR': SVR(kernel='rbf', C=1.0, epsilon=0.1),
+        'Neural Network': MLPRegressor(
+            hidden_layer_sizes=(100, 50),
+            activation='relu',
+            solver='adam',
+            max_iter=1000,
+            early_stopping=True,
+            random_state=42
+        )
+    }
     
-    # Step 1: Find best random state using only train/test data
-    print("\nStep 1: Finding optimal random state (using train/test data only)...")
-    best_random_state = test_different_random_states(X_train, y_train, X_test, y_test)
+    # Train and evaluate each model
+    model_results = {}
+    for name, model in models_to_evaluate.items():
+        print(f"\ntraining {name}...")
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        model_results[name] = {'model': model, 'test_rmse': rmse}
     
-    # Step 2: Train individual LightGBM using only train/test data
-    print(f"\nStep 2: Training LightGBM with optimal random state ({best_random_state})...")
-    lgb_model, lgb_params, lgb_rmse = tune_lightgbm_model(
-        X_train, y_train, X_test, y_test, 
-        random_state=best_random_state
-    )
+    # Sort by performance
+    sorted_models = sorted(model_results.items(), key=lambda x: x[1]['test_rmse'])
     
-    # Step 3: Train stacking ensemble using only train/test data
-    print(f"\nStep 3: Training Stacking Ensemble...")
-    stack_model, stack_rmse = tune_model_stack(  # Now correctly unpacks 2 values
-        X_train, y_train, X_test, y_test,
-        random_state=best_random_state
-    )
+    print("\nmodel performance ranking:")
+    for rank, (name, results) in enumerate(sorted_models, 1):
+        print(f"{rank}. {name}: {results['test_rmse']:.4f} rmse")
     
-    # Step 4: Select best model based on test performance
-    print("\n" + "="*80)
-    print("MODEL SELECTION RESULTS (Test Set)")
-    print("="*80)
-    print(f"LightGBM Test RMSE:      {lgb_rmse:.4f}")
-    print(f"Stacking Test RMSE:      {stack_rmse:.4f}")
+    # Select best model
+    best_model_name, best_results = sorted_models[0]
+    best_model = best_results['model']
     
-    improvement = abs(lgb_rmse - stack_rmse)
-    improvement_pct = (improvement / max(lgb_rmse, stack_rmse)) * 100
+    print(f"\nbest model: {best_model_name}")
     
-    if stack_rmse < lgb_rmse:
-        print(f"🏆 Stacking Ensemble selected (improvement: {improvement:.4f} RMSE, {improvement_pct:.1f}%)")
-        best_model = stack_model
-        best_model_name = "Stacking Ensemble"
+    # Also train stacking ensemble for comparison
+    print("\ntraining stacking ensemble for comparison...")
+    stack_model, stack_rmse = tune_model_stack(X_train, y_train, X_test, y_test)
+    
+    # Compare best individual model with stacking ensemble
+    if stack_rmse < best_results['test_rmse']:
+        print("stacking ensemble performs better than individual models")
+        final_model = stack_model
+        final_model_name = "Stacking Ensemble"
     else:
-        print(f"🏆 LightGBM selected (improvement: {improvement:.4f} RMSE, {improvement_pct:.1f}%)")
-        best_model = lgb_model
-        best_model_name = "LightGBM"
+        print(f"{best_model_name} performs better than stacking ensemble")
+        final_model = best_model
+        final_model_name = best_model_name
     
-    # Step 5: NOW use the holdout dataset for final validation
-    print("\n" + "="*80)
-    print("HOLDOUT DATASET VALIDATION (COMPLETELY UNSEEN DATA)")
-    print("="*80)
+    # Step 4: NOW use the holdout dataset for final validation
+    print("\nHOLDOUT DATASET VALIDATION (COMPLETELY UNSEEN DATA)")
     print("  This is the FIRST TIME these models see the holdout data!")
     
-    # Test both models on holdout data
+    # Test models on holdout data
     holdout_results = {}
     
-    print(f"\nTesting LightGBM on holdout data...")
-    holdout_results['lgb'] = make_holdout_predictions(
-        lgb_model, X_holdout, y_holdout, "LightGBM"
+    print("\ntesting individual model on holdout data...")
+    holdout_results['individual'] = make_holdout_predictions(
+        final_model, X_holdout, y_holdout, final_model_name
     )
     
-    print(f"\nTesting Stacking Ensemble on holdout data...")
+    print("\ntesting stacking ensemble on holdout data...")
     holdout_results['stack'] = make_holdout_predictions(
         stack_model, X_holdout, y_holdout, "Stacking Ensemble"
     )
     
-    # Step 6: Final performance comparison
-    print("\n" + "="*80)
-    print("FINAL PERFORMANCE COMPARISON")
-    print("="*80)
-    
-    lgb_holdout_rmse = holdout_results['lgb']['rmse']
+    # Get holdout RMSEs
+    individual_holdout_rmse = holdout_results['individual']['rmse']
     stack_holdout_rmse = holdout_results['stack']['rmse']
     
+    # Final performance comparison
+    print("\nfinal performance comparison")
     print(f"{'Model':<20} {'Test RMSE':<12} {'Holdout RMSE':<15} {'Difference':<12}")
     print(f"{'-'*65}")
-    print(f"{'LightGBM':<20} {lgb_rmse:<12.4f} {lgb_holdout_rmse:<15.4f} {abs(lgb_rmse - lgb_holdout_rmse):<12.4f}")
-    print(f"{'Stacking Ensemble':<20} {stack_rmse:<12.4f} {stack_holdout_rmse:<15.4f} {abs(stack_rmse - stack_holdout_rmse):<12.4f}")
     
-    # Generalization analysis
-    lgb_generalization_gap = abs(lgb_rmse - lgb_holdout_rmse)
+    if final_model_name == "Stacking Ensemble":
+        # Show best individual model first, then stacking ensemble
+        print(f"{best_model_name:<20} {best_results['test_rmse']:<12.4f} {individual_holdout_rmse:<15.4f} {abs(best_results['test_rmse'] - individual_holdout_rmse):<12.4f}")
+        print(f"{'Stacking Ensemble':<20} {stack_rmse:<12.4f} {stack_holdout_rmse:<15.4f} {abs(stack_rmse - stack_holdout_rmse):<12.4f}")
+    else:
+        # Show stacking ensemble first, then best individual model
+        print(f"{'Stacking Ensemble':<20} {stack_rmse:<12.4f} {stack_holdout_rmse:<15.4f} {abs(stack_rmse - stack_holdout_rmse):<12.4f}")
+        print(f"{best_model_name:<20} {best_results['test_rmse']:<12.4f} {individual_holdout_rmse:<15.4f} {abs(best_results['test_rmse'] - individual_holdout_rmse):<12.4f}")
+
+    # Calculate generalization gaps
+    individual_generalization_gap = abs(best_results['test_rmse'] - individual_holdout_rmse)
     stack_generalization_gap = abs(stack_rmse - stack_holdout_rmse)
     
-    print(f"\n Generalization Analysis:")
-    if lgb_generalization_gap < 0.01:
-        print(f"    LightGBM: Excellent generalization (gap: {lgb_generalization_gap:.4f})")
-    elif lgb_generalization_gap < 0.05:
-        print(f"    LightGBM: Good generalization (gap: {lgb_generalization_gap:.4f})")
+    print("\ngeneralization analysis:")
+    # Report for best individual model
+    if individual_generalization_gap < 0.01:
+        print(f"    {best_model_name}: excellent generalization (gap: {individual_generalization_gap:.4f})")
+    elif individual_generalization_gap < 0.05:
+        print(f"    {best_model_name}: good generalization (gap: {individual_generalization_gap:.4f})")
     else:
-        print(f"     LightGBM: Poor generalization (gap: {lgb_generalization_gap:.4f})")
+        print(f"    {best_model_name}: poor generalization (gap: {individual_generalization_gap:.4f})")
     
+    # Report for stacking ensemble
     if stack_generalization_gap < 0.01:
-        print(f"    Stacking: Excellent generalization (gap: {stack_generalization_gap:.4f})")
+        print(f"    Stacking Ensemble: excellent generalization (gap: {stack_generalization_gap:.4f})")
     elif stack_generalization_gap < 0.05:
-        print(f"    Stacking: Good generalization (gap: {stack_generalization_gap:.4f})")
+        print(f"    Stacking Ensemble: good generalization (gap: {stack_generalization_gap:.4f})")
     else:
-        print(f"     Stacking: Poor generalization (gap: {stack_generalization_gap:.4f})")
+        print(f"    Stacking Ensemble: poor generalization (gap: {stack_generalization_gap:.4f})")
     
-    # Step 7: Save everything
-    print(f"\nStep 7: Saving models and holdout results...")
-    lgb_file, stack_file, results_file = save_models_and_holdout_results(
-        lgb_model, stack_model, lgb_params, lgb_rmse, stack_rmse,
+    # Save results
+    print("\nsaving models and results...")
+    results_file = save_model_results(
+        final_model, stack_model, 
+        best_results['test_rmse'], stack_rmse,
         holdout_results, feature_names, scaler
     )
     
-    return best_model, best_model_name, holdout_results, {
-        'lgb_model': lgb_model,
-        'lgb_test_rmse': lgb_rmse,
-        'lgb_holdout_rmse': lgb_holdout_rmse,
+    return final_model, final_model_name, holdout_results, {
+        'best_model': best_model,
+        'best_test_rmse': best_results['test_rmse'],
+        'best_holdout_rmse': individual_holdout_rmse,
         'stack_model': stack_model,
         'stack_test_rmse': stack_rmse,
         'stack_holdout_rmse': stack_holdout_rmse,
-        'model_files': {
-            'lgb_file': lgb_file,
-            'stack_file': stack_file,
-            'results_file': results_file
-        }
+        'model_files': {'results': results_file}
     }
+
+def save_model_results(final_model, stack_model, final_rmse, stack_rmse, holdout_results, feature_names, scaler):
+    """Helper function to save model results"""
+    os.makedirs('saved_models', exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    results_filename = f'saved_models/model_comparison_and_holdout_{timestamp}.txt'
+    with open(results_filename, 'w') as f:
+        f.write(f"Model Comparison and Holdout Results - {timestamp}\n")
+        f.write("="*70 + "\n\n")
+        
+        f.write("MODEL SELECTION RESULTS:\n")
+        f.write(f"Final Model Test RMSE: {final_rmse:.4f}\n")
+        f.write(f"Stacking Test RMSE: {stack_rmse:.4f}\n\n")
+        
+        f.write("HOLDOUT VALIDATION RESULTS:\n")
+        for model_key, results in holdout_results.items():
+            f.write(f"{results['model_name']}:\n")
+            f.write(f"  RMSE: {results['rmse']:.4f}\n")
+            f.write(f"  MAE: {results['mae']:.4f}\n")
+            f.write(f"  MAPE: {results['mape']:.2f}%\n\n")
+        
+        f.write(f"Feature Names: {feature_names}\n")
+    
+    return results_filename

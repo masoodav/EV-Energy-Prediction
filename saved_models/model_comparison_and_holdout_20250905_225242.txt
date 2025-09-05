@@ -1,0 +1,19 @@
+Model Comparison and Holdout Results - 20250905_225242
+======================================================================
+
+MODEL SELECTION RESULTS:
+Final Model Test RMSE: 0.2904
+Stacking Test RMSE: 0.0839
+
+HOLDOUT VALIDATION RESULTS:
+Stacking Ensemble:
+  RMSE: 0.2785
+  MAE: 0.2353
+  MAPE: 62.49%
+
+Stacking Ensemble:
+  RMSE: 0.2785
+  MAE: 0.2353
+  MAPE: 62.49%
+
+Feature Names: ['instantaneous_power_proxy', 'total_braking_force', 'traffic_density', 'weather_condition_Foggy', 'weather_condition_Rainy', 'weather_condition_Snowy', 'weather_condition_Sunny', 'road_type_Highway', 'road_type_Rural', 'road_type_Urban']
